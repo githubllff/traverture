@@ -3,6 +3,9 @@ export interface TravertureSettings {
     outputLanguage: string;
     autoDetect: boolean;
     titleFormat: string;
+    // New settings
+    linkScheme?: 'popup' | 'jwlibrary' | 'jworg';
+    offlineEpubEnabled?: boolean;
 }
 
 export const DEFAULT_SETTINGS: TravertureSettings = {
@@ -10,6 +13,8 @@ export const DEFAULT_SETTINGS: TravertureSettings = {
     outputLanguage: 'en',
     autoDetect: true,
     titleFormat: 'full',
+    linkScheme: 'popup',
+    offlineEpubEnabled: true,
 };
 
 export interface LanguageInfo {
