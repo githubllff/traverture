@@ -1,5 +1,1 @@
-// Apply the shared external-link opener in the existing JW-link click handlers:
-// 1. Build the existing `url` exactly as before.
-// 2. Call `window.open(url, "_blank", "noopener,noreferrer")` first.
-// 3. If it returns a falsy value, fall back to Electron shell.openExternal(url).
-// 4. Do not use Electron as the primary opener.
+RESTORE_FROM_PARENT_COMMIT_6601511E94150E456A6AE020A11725EC60B40A73
