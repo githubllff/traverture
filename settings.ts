@@ -81,6 +81,22 @@ export class TravertureSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        // New setting: JW link behavior
+        new Setting(containerEl)
+            .setName('JW link behavior')
+            .setDesc('When clicking a scripture link: show popup, open JW Library app, or open web finder')
+            .addDropdown((dropdown) => {
+                dropdown.addOption('popup', 'Popup (show verse modal)');
+                dropdown.addOption('jwlibrary', 'Open via JW Library app (jwlibrary://)');
+                dropdown.addOption('jworg', 'Open via https://www.jw.org/finder (web)');
+                dropdown
+                    .setValue(this.plugin.settings.linkScheme ?? 'popup')
+                    .onChange(async (value) => {
+                        this.plugin.settings.linkScheme = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
+
         const footerEl = containerEl.createDiv({ cls: 'traverture-settings-footer' });
         const footerText = footerEl.createSpan();
         footerText.appendChild(document.createTextNode('My other Obsidian plugin: '));
