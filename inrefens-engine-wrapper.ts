@@ -17,18 +17,7 @@ let cachedLanguages: any = null;
 export async function initInrefensEngine(app: App, language: string, travertureEnabled: boolean = true): Promise<void> {
     if (engineInitialized) return;
 
-    const payload = (wasmBinary as any).slice
-        ? (wasmBinary as any).slice((wasmBinary as any).indexOf(WASM_START) + WASM_START.length, (wasmBinary as any).indexOf(WASM_END))
-        : null;
-
-    let wasmBin: Uint8Array;
-    if (payload) {
-        wasmBin = Uint8Array.from(atob(payload), (c: string) => c.charCodeAt(0));
-    } else {
-        wasmBin = wasmBinary as any;
-    }
-
-    await wasmModule.default({ module_or_path: wasmBin });
+    await wasmModule.default({ module_or_path: wasmBinary });
 
     engineInstance = new wasmModule.InrefensEngine(language, travertureEnabled, 0);
     engineInitialized = true;
