@@ -12,12 +12,14 @@ import { TravertureSidebarView } from './sidebar';
 import { DEFAULT_SETTINGS, VIEW_TYPE_TRAVERTURE_SIDEBAR, SidebarRef } from './types';
 import { VaultOfflineEpubRepository } from './VaultOfflineEpubRepository';
 import { EpubImportService } from './EpubImportService';
-import { augmentClauses } from './relativeRefs';
+import { augmentClauses, augmentClausesWithState } from './relativeRefs';
 
 export default class TraverturePlugin extends Plugin {
     settings = DEFAULT_SETTINGS;
     engine: any = null;
     private processingElements = new Set<HTMLElement>();
+    private lastRefBook = -1;
+    private lastRefChapter = -1;
 
     // offline importer & repo
     offlineRepo: VaultOfflineEpubRepository | null = null;
@@ -147,7 +149,9 @@ export default class TraverturePlugin extends Plugin {
     }
 
     processElement(el: HTMLElement) {
-        if (el.querySelector('.callout, svg')) return;
+        const isMindMap = !!el.closest('.mindmap, .mm-mindmap-container, [class*="mindmap"]') ||
+            !!el.querySelector('.mindmap, .mm-mindmap-container, [class*="mindmap"]');
+        if (!isMindMap && el.querySelector('.callout, svg')) return;
         if (this.processingElements.has(el)) return;
         this.processingElements.add(el);
 
@@ -233,15 +237,21 @@ export default class TraverturePlugin extends Plugin {
                 node = walker.nextNode();
             }
 
+            let lastBook = this.lastRefBook;
+            let lastChapter = this.lastRefChapter;
+
             for (const textNode of textNodes) {
                 const text = textNode.nodeValue || '';
                 const parsed = this.safeParse(text);
-                if (!parsed) continue;
+                let clauses: Array<[string, number, number, string[][]]> = [];
+                if (parsed) {
+                    try { clauses = JSON.parse(parsed); } catch { clauses = []; }
+                }
 
-                const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
-                if (clauses.length === 0) continue;
+                const { html: linked, lastBook: lb, lastChapter: lc } = this.insertLinks(text, clauses, lastBook, lastChapter);
+                lastBook = lb;
+                lastChapter = lc;
 
-                const linked = this.insertLinks(text, clauses);
                 if (linked !== text) {
                     const fragment = activeDocument.createDocumentFragment();
                     const parsedLinked = new DOMParser().parseFromString(linked, 'text/html');
@@ -251,6 +261,9 @@ export default class TraverturePlugin extends Plugin {
                     textNode.parentNode?.replaceChild(fragment, textNode);
                 }
             }
+
+            this.lastRefBook = lastBook;
+            this.lastRefChapter = lastChapter;
 
             html = tempDiv.innerHTML;
         }
@@ -390,9 +403,17 @@ export default class TraverturePlugin extends Plugin {
         }
     }
 
-    private insertLinks(text: string, clauses: Array<[string, number, number, string[][]]>): string {
-        clauses = augmentClauses(text, clauses);
-        if (clauses.length === 0) return text;
+    private insertLinks(
+        text: string,
+        clauses: Array<[string, number, number, string[][]]>,
+        initialBook: number = -1,
+        initialChapter: number = -1
+    ): { html: string; lastBook: number; lastChapter: number } {
+        const augmented = augmentClausesWithState(text, clauses, initialBook, initialChapter);
+        clauses = augmented.clauses;
+        if (clauses.length === 0) {
+            return { html: text, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
+        }
 
         const positions: Array<{
             start: number;
@@ -428,7 +449,7 @@ export default class TraverturePlugin extends Plugin {
             positions.push({ start: startPos, end: endPos, displayText, bcv, clauseText });
         }
 
-        if (positions.length === 0) return text;
+        if (positions.length === 0) return { html: text, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
         positions.sort((a, b) => a.start - b.start);
 
         let result = '';
@@ -443,7 +464,7 @@ export default class TraverturePlugin extends Plugin {
         }
 
         result += text.substring(pos);
-        return result;
+        return { html: result, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
     }
 
     async onload() {

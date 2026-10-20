@@ -901,8 +901,10 @@ function parseRange(s) {
   const b = parts.length > 1 ? parseInt(parts[1], 10) : a;
   return [a, b];
 }
-function augmentClauses(text, clauses) {
-  if (!clauses || clauses.length === 0) return clauses;
+function augmentClausesWithState(text, clauses, initialBook = -1, initialChapter = -1) {
+  if (!clauses || clauses.length === 0) {
+    clauses = [];
+  }
   const absIntervals = clauses.map((c) => [c[1], c[2]]);
   const overlapsAbs = (s, e) => absIntervals.some(([a, b]) => s < b && e > a);
   const candidates = [];
@@ -941,8 +943,8 @@ function augmentClauses(text, clauses) {
     ...absItems.map((a) => ({ type: "abs", start: a.start, end: a.end, book: a.book, chapter: a.chapter })),
     ...chosen.map((c) => ({ type: "rel", start: c.start, end: c.end, kind: c.kind, payload: c.payload }))
   ].sort((a, b) => a.start - b.start);
-  let lastBook = -1;
-  let lastChapter = -1;
+  let lastBook = initialBook;
+  let lastChapter = initialChapter;
   const synthetic = [];
   for (const item of merged) {
     if (item.type === "abs") {
@@ -969,7 +971,11 @@ function augmentClauses(text, clauses) {
     }
     synthetic.push([originalText, item.start, item.end, [[bcv, bcv]]]);
   }
-  return [...clauses, ...synthetic].sort((a, b) => a[1] - b[1]);
+  const allClauses = [...clauses, ...synthetic].sort((a, b) => a[1] - b[1]);
+  return { clauses: allClauses, lastBook, lastChapter };
+}
+function augmentClauses(text, clauses) {
+  return augmentClausesWithState(text, clauses, -1, -1).clauses;
 }
 
 // editor.ts
@@ -2427,6 +2433,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.engine = null;
     this.processingElements = /* @__PURE__ */ new Set();
+    this.lastRefBook = -1;
+    this.lastRefChapter = -1;
     // offline importer & repo
     this.offlineRepo = null;
     this.epubImportService = null;
@@ -2537,7 +2545,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     return results;
   }
   processElement(el) {
-    if (el.querySelector(".callout, svg")) return;
+    const isMindMap = !!el.closest('.mindmap, .mm-mindmap-container, [class*="mindmap"]') || !!el.querySelector('.mindmap, .mm-mindmap-container, [class*="mindmap"]');
+    if (!isMindMap && el.querySelector(".callout, svg")) return;
     if (this.processingElements.has(el)) return;
     this.processingElements.add(el);
     let html = el.innerHTML;
@@ -2602,13 +2611,22 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         textNodes.push(node);
         node = walker.nextNode();
       }
+      let lastBook = this.lastRefBook;
+      let lastChapter = this.lastRefChapter;
       for (const textNode of textNodes) {
         const text = textNode.nodeValue || "";
         const parsed2 = this.safeParse(text);
-        if (!parsed2) continue;
-        const clauses = JSON.parse(parsed2);
-        if (clauses.length === 0) continue;
-        const linked = this.insertLinks(text, clauses);
+        let clauses = [];
+        if (parsed2) {
+          try {
+            clauses = JSON.parse(parsed2);
+          } catch {
+            clauses = [];
+          }
+        }
+        const { html: linked, lastBook: lb, lastChapter: lc } = this.insertLinks(text, clauses, lastBook, lastChapter);
+        lastBook = lb;
+        lastChapter = lc;
         if (linked !== text) {
           const fragment = activeDocument.createDocumentFragment();
           const parsedLinked = new DOMParser().parseFromString(linked, "text/html");
@@ -2618,6 +2636,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           textNode.parentNode?.replaceChild(fragment, textNode);
         }
       }
+      this.lastRefBook = lastBook;
+      this.lastRefChapter = lastChapter;
       html = tempDiv.innerHTML;
     }
     const parsed = new DOMParser().parseFromString(html, "text/html");
@@ -2721,9 +2741,12 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       })();
     }
   }
-  insertLinks(text, clauses) {
-    clauses = augmentClauses(text, clauses);
-    if (clauses.length === 0) return text;
+  insertLinks(text, clauses, initialBook = -1, initialChapter = -1) {
+    const augmented = augmentClausesWithState(text, clauses, initialBook, initialChapter);
+    clauses = augmented.clauses;
+    if (clauses.length === 0) {
+      return { html: text, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
+    }
     const positions = [];
     let bookName = "";
     for (let i2 = 0; i2 < clauses.length; i2++) {
@@ -2740,7 +2763,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       const bcv = ranges[0][0] === ranges[0][1] ? ranges[0][0] : `${ranges[0][0]}-${ranges[0][1]}`;
       positions.push({ start: startPos, end: endPos, displayText, bcv, clauseText });
     }
-    if (positions.length === 0) return text;
+    if (positions.length === 0) return { html: text, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
     positions.sort((a, b) => a.start - b.start);
     let result = "";
     let pos = 0;
@@ -2752,7 +2775,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       pos = p.end;
     }
     result += text.substring(pos);
-    return result;
+    return { html: result, lastBook: augmented.lastBook, lastChapter: augmented.lastChapter };
   }
   async onload() {
     await this.loadSettings();
