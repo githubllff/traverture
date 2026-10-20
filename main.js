@@ -1134,12 +1134,16 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
     this.plugin = plugin;
   }
   async chooseAndImportEpub(overwriteExisting = false) {
-    const input = document.createElement("input");
+    const input = this.containerEl.createEl("input");
     input.type = "file";
     input.accept = ".epub,application/epub+zip";
-    input.style.display = "none";
+    input.hidden = true;
     const done = new Promise((resolve) => {
-      input.onchange = async () => {
+      const finish = () => {
+        input.remove();
+        resolve();
+      };
+      input.addEventListener("change", async () => {
         try {
           const file = input.files?.[0];
           if (!file) return;
@@ -1159,12 +1163,13 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
             new import_obsidian3.Notice(`Imported offline corpus: ${result.metadata?.language}`);
           }
         } finally {
-          input.remove();
-          resolve();
+          finish();
         }
-      };
+      });
+      input.addEventListener("cancel", () => {
+        finish();
+      });
     });
-    document.body.appendChild(input);
     input.click();
     await done;
   }

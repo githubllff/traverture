@@ -11,13 +11,18 @@ export class TravertureSettingTab extends PluginSettingTab {
   }
 
   async chooseAndImportEpub(overwriteExisting = false): Promise<void> {
-    const input = document.createElement("input");
+    const input = this.containerEl.createEl("input");
     input.type = "file";
     input.accept = ".epub,application/epub+zip";
-    input.style.display = "none";
+    input.hidden = true;
 
     const done = new Promise<void>((resolve) => {
-      input.onchange = async () => {
+      const finish = () => {
+        input.remove();
+        resolve();
+      };
+
+      input.addEventListener("change", async () => {
         try {
           const file = input.files?.[0];
           if (!file) return;
@@ -40,13 +45,15 @@ export class TravertureSettingTab extends PluginSettingTab {
             new Notice(`Imported offline corpus: ${result.metadata?.language}`);
           }
         } finally {
-          input.remove();
-          resolve();
+          finish();
         }
-      };
+      });
+
+      input.addEventListener("cancel", () => {
+        finish();
+      });
     });
 
-    document.body.appendChild(input);
     input.click();
     await done;
   }
