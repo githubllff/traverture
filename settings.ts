@@ -130,6 +130,18 @@ export class TravertureSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Show verse text after link")
+      .setDesc("Append the verse text immediately after each scripture link (uses offline EPUB when available).")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.showVerseText ?? false)
+          .onChange(async (value) => {
+            this.plugin.settings.showVerseText = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
       .setName("JW link scheme")
       .setDesc("Choose how scripture links are opened: popup (modal preview), JW Library app, or JW.org.")
       .addDropdown((dropdown) => {

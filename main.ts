@@ -345,7 +345,44 @@ export default class TraverturePlugin extends Plugin {
             });
         });
 
+        void this.appendInlineVerseText(el);
+
         this.processingElements.delete(el);
+    }
+
+    private async appendInlineVerseText(el: HTMLElement): Promise<void> {
+        if (!this.settings.showVerseText) return;
+
+        const links = Array.from(el.querySelectorAll('.traverture-ref-link')) as HTMLElement[];
+        for (const link of links) {
+            if (link.dataset.inlineDone === '1') continue;
+            link.dataset.inlineDone = '1';
+
+            const bcv = link.getAttribute('data-bcv');
+            if (!bcv) continue;
+
+            void (async () => {
+                const verseData = await fetchVerseWithExtrasOfflineFirst(
+                    bcv,
+                    this.settings.outputLanguage,
+                    this.offlineRepo
+                );
+                if (!verseData) return;
+
+                const tempDiv = activeDocument.createElement('div');
+                const parsedHtml = new DOMParser().parseFromString(verseData.html, 'text/html');
+                for (const child of Array.from(parsedHtml.body.childNodes)) {
+                    tempDiv.appendChild(child.cloneNode(true));
+                }
+                const text = (tempDiv.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!text) return;
+
+                const span = activeDocument.createElement('span');
+                span.className = 'traverture-inline-verse';
+                span.textContent = ` — ${text}`;
+                link.insertAdjacentElement('afterend', span);
+            })();
+        }
     }
 
     private insertLinks(text: string, clauses: Array<[string, number, number, string[][]]>): string {

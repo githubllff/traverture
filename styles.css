@@ -539,3 +539,4 @@
   .traverture-modal-content { flex-direction: column; }
   .traverture-modal-commentary { width: 100%; max-height: 40vh; border-left: none; border-top: 1px solid var(--background-modifier-border, #e5e7eb); }
 }
+.traverture-inline-verse { font-style: italic; opacity: 0.85; margin-left: 0.25em; }

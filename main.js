@@ -1219,6 +1219,12 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
+    new import_obsidian3.Setting(containerEl).setName("Show verse text after link").setDesc("Append the verse text immediately after each scripture link (uses offline EPUB when available).").addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.showVerseText ?? false).onChange(async (value) => {
+        this.plugin.settings.showVerseText = value;
+        await this.plugin.saveSettings();
+      });
+    });
     new import_obsidian3.Setting(containerEl).setName("JW link scheme").setDesc("Choose how scripture links are opened: popup (modal preview), JW Library app, or JW.org.").addDropdown((dropdown) => {
       dropdown.addOption("popup", "Popup preview (modal)");
       dropdown.addOption(
@@ -1274,7 +1280,8 @@ var DEFAULT_SETTINGS = {
   autoDetect: true,
   titleFormat: "full",
   linkScheme: "popup",
-  offlineEpubEnabled: true
+  offlineEpubEnabled: true,
+  showVerseText: false
 };
 var VIEW_TYPE_TRAVERTURE_SIDEBAR = "traverture-sidebar-view";
 
@@ -2650,7 +2657,37 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         })();
       });
     });
+    void this.appendInlineVerseText(el);
     this.processingElements.delete(el);
+  }
+  async appendInlineVerseText(el) {
+    if (!this.settings.showVerseText) return;
+    const links = Array.from(el.querySelectorAll(".traverture-ref-link"));
+    for (const link of links) {
+      if (link.dataset.inlineDone === "1") continue;
+      link.dataset.inlineDone = "1";
+      const bcv = link.getAttribute("data-bcv");
+      if (!bcv) continue;
+      void (async () => {
+        const verseData = await fetchVerseWithExtrasOfflineFirst(
+          bcv,
+          this.settings.outputLanguage,
+          this.offlineRepo
+        );
+        if (!verseData) return;
+        const tempDiv = activeDocument.createElement("div");
+        const parsedHtml = new DOMParser().parseFromString(verseData.html, "text/html");
+        for (const child of Array.from(parsedHtml.body.childNodes)) {
+          tempDiv.appendChild(child.cloneNode(true));
+        }
+        const text = (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text) return;
+        const span = activeDocument.createElement("span");
+        span.className = "traverture-inline-verse";
+        span.textContent = ` \u2014 ${text}`;
+        link.insertAdjacentElement("afterend", span);
+      })();
+    }
   }
   insertLinks(text, clauses) {
     clauses = augmentClauses(text, clauses);
