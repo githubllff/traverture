@@ -1134,44 +1134,67 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
     this.plugin = plugin;
   }
   async chooseAndImportEpub(overwriteExisting = false) {
-    const input = this.containerEl.createEl("input");
-    input.type = "file";
-    input.accept = ".epub,application/epub+zip";
-    input.hidden = true;
-    const done = new Promise((resolve) => {
-      const finish = () => {
-        input.remove();
-        resolve();
-      };
-      input.addEventListener("change", async () => {
-        try {
-          const file = input.files?.[0];
-          if (!file) return;
-          if (!this.plugin.epubImportService) {
-            new import_obsidian3.Notice("EPUB importer not initialized.");
-            return;
-          }
-          const data = new Uint8Array(await file.arrayBuffer());
-          const result = await this.plugin.epubImportService.importEpub(
-            data,
-            file.name,
-            overwriteExisting
-          );
-          if (!result.success) {
-            new import_obsidian3.Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
-          } else {
-            new import_obsidian3.Notice(`Imported offline corpus: ${result.metadata?.language}`);
-          }
-        } finally {
-          finish();
+    let file = null;
+    const picker = window.showOpenFilePicker;
+    if (typeof picker === "function") {
+      try {
+        const [handle] = await picker({
+          types: [
+            {
+              description: "EPUB files",
+              accept: { "application/epub+zip": [".epub"] }
+            }
+          ],
+          multiple: false
+        });
+        file = await handle.getFile();
+      } catch (e) {
+        if (e && e.name !== "AbortError") {
+        } else {
+          return;
         }
+      }
+    }
+    if (!file) {
+      const input = this.containerEl.createEl("input");
+      input.type = "file";
+      input.accept = ".epub,application/epub+zip";
+      input.hidden = true;
+      file = await new Promise((resolve) => {
+        const finish = (f) => {
+          input.remove();
+          resolve(f);
+        };
+        input.addEventListener("change", () => {
+          finish(input.files?.[0] ?? null);
+        });
+        input.addEventListener("cancel", () => {
+          finish(null);
+        });
+        input.click();
       });
-      input.addEventListener("cancel", () => {
-        finish();
-      });
-    });
-    input.click();
-    await done;
+    }
+    if (!file) return;
+    if (!this.plugin.epubImportService) {
+      new import_obsidian3.Notice("EPUB importer not initialized.");
+      return;
+    }
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const result = await this.plugin.epubImportService.importEpub(
+        data,
+        file.name,
+        overwriteExisting
+      );
+      if (!result.success) {
+        new import_obsidian3.Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
+      } else {
+        new import_obsidian3.Notice(`Imported offline corpus: ${result.metadata?.language}`);
+      }
+    } catch (e) {
+      new import_obsidian3.Notice(`EPUB import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    this.display();
   }
   display() {
     const { containerEl } = this;

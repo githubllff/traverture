@@ -11,51 +11,81 @@ export class TravertureSettingTab extends PluginSettingTab {
   }
 
   async chooseAndImportEpub(overwriteExisting = false): Promise<void> {
-    const input = this.containerEl.createEl("input");
-    input.type = "file";
-    input.accept = ".epub,application/epub+zip";
-    input.hidden = true;
+    let file: File | null = null;
 
-    const done = new Promise<void>((resolve) => {
-      const finish = () => {
-        input.remove();
-        resolve();
-      };
-
-      input.addEventListener("change", async () => {
-        try {
-          const file = input.files?.[0];
-          if (!file) return;
-
-          if (!this.plugin.epubImportService) {
-            new Notice("EPUB importer not initialized.");
-            return;
-          }
-
-          const data = new Uint8Array(await file.arrayBuffer());
-          const result = await this.plugin.epubImportService.importEpub(
-            data,
-            file.name,
-            overwriteExisting,
-          );
-
-          if (!result.success) {
-            new Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
-          } else {
-            new Notice(`Imported offline corpus: ${result.metadata?.language}`);
-          }
-        } finally {
-          finish();
+    // Prefer the File System Access API when available (more reliable in Electron/Obsidian).
+    const picker = (window as any).showOpenFilePicker;
+    if (typeof picker === "function") {
+      try {
+        const [handle] = await picker({
+          types: [
+            {
+              description: "EPUB files",
+              accept: { "application/epub+zip": [".epub"] },
+            },
+          ],
+          multiple: false,
+        });
+        file = await handle.getFile();
+      } catch (e: any) {
+        // User cancelled or API unavailable; fall through to input fallback.
+        if (e && e.name !== "AbortError") {
+          // fall through
+        } else {
+          return;
         }
-      });
+      }
+    }
 
-      input.addEventListener("cancel", () => {
-        finish();
-      });
-    });
+    if (!file) {
+      const input = this.containerEl.createEl("input");
+      input.type = "file";
+      input.accept = ".epub,application/epub+zip";
+      input.hidden = true;
 
-    input.click();
-    await done;
+      file = await new Promise<File | null>((resolve) => {
+        const finish = (f: File | null) => {
+          input.remove();
+          resolve(f);
+        };
+
+        input.addEventListener("change", () => {
+          finish(input.files?.[0] ?? null);
+        });
+
+        input.addEventListener("cancel", () => {
+          finish(null);
+        });
+
+        input.click();
+      });
+    }
+
+    if (!file) return;
+
+    if (!this.plugin.epubImportService) {
+      new Notice("EPUB importer not initialized.");
+      return;
+    }
+
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const result = await this.plugin.epubImportService.importEpub(
+        data,
+        file.name,
+        overwriteExisting,
+      );
+
+      if (!result.success) {
+        new Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
+      } else {
+        new Notice(`Imported offline corpus: ${result.metadata?.language}`);
+      }
+    } catch (e) {
+      new Notice(`EPUB import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    this.display();
   }
 
   display(): void {
