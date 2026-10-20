@@ -230,22 +230,40 @@ export default class TraverturePlugin extends Plugin {
                 }
             });
 
-            const textNodes: Text[] = [];
+            const allTextNodes: Text[] = [];
             let node = walker.nextNode();
             while (node) {
-                textNodes.push(node as Text);
+                allTextNodes.push(node as Text);
                 node = walker.nextNode();
             }
 
             let lastBook = this.lastRefBook;
             let lastChapter = this.lastRefChapter;
 
-            for (const textNode of textNodes) {
+            for (const textNode of allTextNodes) {
                 const text = textNode.nodeValue || '';
+                if (!text) continue;
+
                 const parsed = this.safeParse(text);
                 let clauses: Array<[string, number, number, string[][]]> = [];
                 if (parsed) {
                     try { clauses = JSON.parse(parsed); } catch { clauses = []; }
+                }
+
+                const isInsideAnchor = !!textNode.parentElement?.closest('a');
+
+                if (isInsideAnchor) {
+                    // Only update state from absolute refs; do not create links.
+                    for (const c of clauses) {
+                        const bcv = (c[3] && c[3][0] && c[3][0][0]) ? c[3][0][0] : '';
+                        if (bcv) {
+                            const b = parseInt(bcv.substring(0, 2), 10);
+                            const ch = parseInt(bcv.substring(2, 5), 10);
+                            if (b > 0) lastBook = b;
+                            if (ch > 0) lastChapter = ch;
+                        }
+                    }
+                    continue;
                 }
 
                 const { html: linked, lastBook: lb, lastChapter: lc } = this.insertLinks(text, clauses, lastBook, lastChapter);

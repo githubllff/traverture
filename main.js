@@ -2605,16 +2605,17 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           return NodeFilter.FILTER_ACCEPT;
         }
       });
-      const textNodes = [];
+      const allTextNodes = [];
       let node = walker.nextNode();
       while (node) {
-        textNodes.push(node);
+        allTextNodes.push(node);
         node = walker.nextNode();
       }
       let lastBook = this.lastRefBook;
       let lastChapter = this.lastRefChapter;
-      for (const textNode of textNodes) {
+      for (const textNode of allTextNodes) {
         const text = textNode.nodeValue || "";
+        if (!text) continue;
         const parsed2 = this.safeParse(text);
         let clauses = [];
         if (parsed2) {
@@ -2623,6 +2624,19 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           } catch {
             clauses = [];
           }
+        }
+        const isInsideAnchor = !!textNode.parentElement?.closest("a");
+        if (isInsideAnchor) {
+          for (const c of clauses) {
+            const bcv = c[3] && c[3][0] && c[3][0][0] ? c[3][0][0] : "";
+            if (bcv) {
+              const b = parseInt(bcv.substring(0, 2), 10);
+              const ch = parseInt(bcv.substring(2, 5), 10);
+              if (b > 0) lastBook = b;
+              if (ch > 0) lastChapter = ch;
+            }
+          }
+          continue;
         }
         const { html: linked, lastBook: lb, lastChapter: lc } = this.insertLinks(text, clauses, lastBook, lastChapter);
         lastBook = lb;
