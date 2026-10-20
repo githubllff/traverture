@@ -178,26 +178,7 @@ export class TravertureSettingTab extends PluginSettingTab {
           });
       });
 
-    new Setting(containerEl)
-      .setName("Include publication references (in(REF)ens)")
-      .setDesc("Also detect and link publication citations (Watchtower, Awake!, etc.) like in(REF)ens.")
-      .addToggle((toggle) => {
-        toggle
-          .setValue(this.plugin.settings.includePublicationRefs ?? false)
-          .onChange(async (value) => {
-            this.plugin.settings.includePublicationRefs = value;
-            await this.plugin.saveSettings();
-            if (value) {
-              try {
-                await this.plugin.initInrefensEngine();
-              } catch (e) {
-                new Notice("Failed to initialize publication reference engine.");
-              }
-            } else {
-              this.plugin.resetInrefensEngine();
-            }
-          });
-      });
+
 
     new Setting(containerEl)
       .setName("JW link scheme")

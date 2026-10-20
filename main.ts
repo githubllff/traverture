@@ -13,8 +13,6 @@ import { DEFAULT_SETTINGS, VIEW_TYPE_TRAVERTURE_SIDEBAR, SidebarRef } from './ty
 import { VaultOfflineEpubRepository } from './VaultOfflineEpubRepository';
 import { EpubImportService } from './EpubImportService';
 import { augmentClauses } from './relativeRefs';
-import { initInrefensEngine, isInrefensEngineReady, resetInrefensEngine } from './inrefens-engine-wrapper';
-import { processElement as processInrefensElement } from './inrefens-post-processor';
 
 export default class TraverturePlugin extends Plugin {
     settings = DEFAULT_SETTINGS;
@@ -44,19 +42,6 @@ export default class TraverturePlugin extends Plugin {
         } catch (e) {
             console.error('tra.VER:ture: Failed to create engine:', e);
         }
-    }
-
-    async initInrefensEngine() {
-        try {
-            await initInrefensEngine(this.app, 'en', true);
-        } catch (e) {
-            console.error('tra.VER:ture: Failed to init inrefens engine:', e);
-            throw e;
-        }
-    }
-
-    resetInrefensEngine() {
-        resetInrefensEngine();
     }
 
     private parseGuard = false;
@@ -360,14 +345,6 @@ export default class TraverturePlugin extends Plugin {
             });
         });
 
-        if (this.settings.includePublicationRefs && isInrefensEngineReady()) {
-            try {
-                processInrefensElement(el);
-            } catch (e) {
-                console.error('tra.VER:ture: inrefens process error:', e);
-            }
-        }
-
         void this.appendInlineVerseText(el);
 
         this.processingElements.delete(el);
@@ -477,14 +454,6 @@ export default class TraverturePlugin extends Plugin {
             this.createEngine();
         } catch (e) {
             console.error('tra.VER:ture: WASM error:', e);
-        }
-
-        if (this.settings.includePublicationRefs) {
-            try {
-                await this.initInrefensEngine();
-            } catch (e) {
-                console.error('tra.VER:ture: Failed to init inrefens engine:', e);
-            }
         }
 
         this.offlineRepo = new VaultOfflineEpubRepository(this.app, this.manifest.id);
