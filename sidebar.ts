@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 // @ts-ignore
 import * as wasmModule from './engine.js';
-import { fetchVerseWithExtras, getAslTimecodes } from './cache';
+import { fetchVerseWithExtrasOfflineFirst, getAslTimecodes } from './cache';
 import { getAvailableLanguages } from './languages';
 import { VerseModal } from './modal';
 import { SidebarRef, VIEW_TYPE_TRAVERTURE_SIDEBAR } from './types';
@@ -298,7 +298,7 @@ export class TravertureSidebarView extends ItemView {
                             : undefined;
                         const modal = new VerseModal();
                         modal.show({ html: `<p><em>Loading...</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
-                        const verseData = await fetchVerseWithExtras(bcv, this.outputLang, modal.getSignal());
+                        const verseData = await fetchVerseWithExtrasOfflineFirst(bcv, this.outputLang, this.plugin.offlineRepo, modal.getSignal());
                         if (!modal.isVisible()) return;
                         modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
                     })(); });

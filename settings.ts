@@ -131,8 +131,9 @@ export class TravertureSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("JW link scheme")
-      .setDesc("Choose how JW links are opened.")
+      .setDesc("Choose how scripture links are opened: popup (modal preview), JW Library app, or JW.org.")
       .addDropdown((dropdown) => {
+        dropdown.addOption("popup", "Popup preview (modal)");
         dropdown.addOption(
           "jwlibrary",
           "Open via jwlibrary:// (native JW Library app)",
@@ -141,13 +142,15 @@ export class TravertureSettingTab extends PluginSettingTab {
 
         const scheme = this.plugin.settings.linkScheme === "jworg"
           ? "jworg"
-          : "jwlibrary";
+          : this.plugin.settings.linkScheme === "popup"
+            ? "popup"
+            : "jwlibrary";
 
         dropdown
           .setValue(scheme)
           .onChange(async (value) => {
             this.plugin.settings.linkScheme =
-              value === "jworg" ? "jworg" : "jwlibrary";
+              value === "jworg" ? "jworg" : value === "popup" ? "popup" : "jwlibrary";
             await this.plugin.saveSettings();
           });
       });

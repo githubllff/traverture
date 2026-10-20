@@ -12,6 +12,7 @@ import { TravertureSidebarView } from './sidebar';
 import { DEFAULT_SETTINGS, VIEW_TYPE_TRAVERTURE_SIDEBAR, SidebarRef } from './types';
 import { VaultOfflineEpubRepository } from './VaultOfflineEpubRepository';
 import { EpubImportService } from './EpubImportService';
+import { augmentClauses } from './relativeRefs';
 
 export default class TraverturePlugin extends Plugin {
     settings = DEFAULT_SETTINGS;
@@ -74,7 +75,8 @@ export default class TraverturePlugin extends Plugin {
         const parsed = this.safeParse(engineText);
         if (!parsed) return results;
 
-        const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        clauses = augmentClauses(engineText, clauses);
         if (clauses.length === 0) return results;
 
         let lastBookNum = -1;
@@ -160,7 +162,8 @@ export default class TraverturePlugin extends Plugin {
                 const parsed = this.safeParse(engineInput);
                 if (!parsed) return inner;
 
-                const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+                let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+                clauses = augmentClauses(engineInput, clauses);
                 if (clauses.length === 0) return inner;
 
                 let result = inner;
@@ -289,7 +292,7 @@ export default class TraverturePlugin extends Plugin {
                         try {
                             const maybeRequire = (window as any).require;
                             if (maybeRequire) {
-                                const { shell } = maybeRequire('electron') as typeof import('electron');
+                                const { shell } = maybeRequire('electron') as any;
                                 await shell.openExternal(url);
                             } else {
                                 window.open(url, '_blank', 'noopener');
@@ -346,6 +349,7 @@ export default class TraverturePlugin extends Plugin {
     }
 
     private insertLinks(text: string, clauses: Array<[string, number, number, string[][]]>): string {
+        clauses = augmentClauses(text, clauses);
         if (clauses.length === 0) return text;
 
         const positions: Array<{
@@ -761,7 +765,8 @@ export default class TraverturePlugin extends Plugin {
         );
         if (!parsed) return;
 
-        const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        clauses = augmentClauses(text, clauses);
         if (clauses.length === 0) return;
 
         const fmtEngine = new wasmModule.TravertureEngine(
@@ -805,7 +810,8 @@ export default class TraverturePlugin extends Plugin {
             return;
         }
 
-        const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+        clauses = augmentClauses(text, clauses);
         if (clauses.length === 0) {
             new Notice('No scripture references found.');
             return;

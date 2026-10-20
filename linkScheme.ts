@@ -1,4 +1,4 @@
-export type LinkScheme = 'jwlibrary' | 'jworg';
+export type LinkScheme = 'popup' | 'jwlibrary' | 'jworg';
 
 export const DEFAULT_LINK_SCHEME: LinkScheme = 'jwlibrary';
 

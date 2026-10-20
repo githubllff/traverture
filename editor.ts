@@ -1,6 +1,8 @@
-import { fetchVerseWithExtras, getAslTimecodes } from './cache';
+import { fetchVerseWithExtrasOfflineFirst, getAslTimecodes } from './cache';
 import { VerseModal } from './modal';
 import { ViewPlugin, Decoration } from '@codemirror/view';
+import { augmentClauses } from './relativeRefs';
+import { getAvailableLanguages } from './languages';
 import { RangeSetBuilder } from '@codemirror/state';
 
 const REF_PATTERN = /\{\{(.+?)\}\}/g;
@@ -29,7 +31,8 @@ function buildDecorations(view: any, plugin: any) {
             const engineInput = cleanMatch.replace('{{', '⟪⟪').replace('}}', '⟫⟫');
             const parsed = plugin.safeParse?.(engineInput);
             if (!parsed) continue;
-            const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+            let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+            clauses = augmentClauses(engineInput, clauses);
             const sorted = [...clauses].sort((a, b) => b[0].length - a[0].length);
             for (const clause of sorted) {
                 const [clauseText, , , ranges] = clause;
@@ -70,7 +73,8 @@ function buildDecorations(view: any, plugin: any) {
 function processSegment(basePos: number, segment: string, plugin: any, allDecos: Array<{ from: number; to: number; deco: any }>, decorated: Array<{ from: number; to: number }>, bcvs: Array<{ from: number; to: number; bcv: string }>) {
     const parsed = plugin.safeParse?.(segment);
     if (!parsed) return;
-    const clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+    let clauses: Array<[string, number, number, string[][]]> = JSON.parse(parsed);
+    clauses = augmentClauses(segment, clauses);
     if (clauses.length === 0) return;
     for (const clause of clauses) {
         const [, startPos, endPos, ranges] = clause;
@@ -152,7 +156,7 @@ async function showModal(plugin: any, bcv: string): Promise<void> {
     const timecodes = plugin.settings.outputLanguage === 'ase' ? await getAslTimecodes(bcv) : undefined;
     const modal = new VerseModal();
     modal.show({ html: `<p><em>Loading...</em></p>`, citation: displayText }, bcv, plugin.settings.outputLanguage, displayText, timecodes);
-    void fetchVerseWithExtras(bcv, plugin.settings.outputLanguage, modal.getSignal()).then(verseData => {
+    void fetchVerseWithExtrasOfflineFirst(bcv, plugin.settings.outputLanguage, plugin.offlineRepo, modal.getSignal()).then(verseData => {
         if (!modal.isVisible()) return;
         modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: displayText }, bcv, plugin.settings.outputLanguage, displayText, timecodes);
     });

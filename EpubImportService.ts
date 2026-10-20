@@ -5,7 +5,7 @@ function strFromU8(u8: Uint8Array): string {
 }
 
 async function webCryptoSha256(data: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', data);
+  const digest = await crypto.subtle.digest('SHA-256', data as any);
   const arr = Array.from(new Uint8Array(digest));
   return arr.map((b) => b.toString(16).padStart(2, '0')).join('');
 }

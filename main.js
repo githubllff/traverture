@@ -18,12 +18,12 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var __toBinary = Uint8Array.fromBase64 || /* @__PURE__ */ (() => {
   var table = new Uint8Array(128);
-  for (var i = 0; i < 64; i++) table[i < 26 ? i + 65 : i < 52 ? i + 71 : i < 62 ? i - 4 : i * 4 - 205] = i;
+  for (var i2 = 0; i2 < 64; i2++) table[i2 < 26 ? i2 + 65 : i2 < 52 ? i2 + 71 : i2 < 62 ? i2 - 4 : i2 * 4 - 205] = i2;
   return (base64) => {
     var n = base64.length, bytes = new Uint8Array((n - (base64[n - 1] == "=") - (base64[n - 2] == "=")) * 3 / 4 | 0);
-    for (var i2 = 0, j = 0; i2 < n; ) {
-      var c0 = table[base64.charCodeAt(i2++)], c1 = table[base64.charCodeAt(i2++)];
-      var c2 = table[base64.charCodeAt(i2++)], c3 = table[base64.charCodeAt(i2++)];
+    for (var i3 = 0, j = 0; i3 < n; ) {
+      var c0 = table[base64.charCodeAt(i3++)], c1 = table[base64.charCodeAt(i3++)];
+      var c2 = table[base64.charCodeAt(i3++)], c3 = table[base64.charCodeAt(i3++)];
       bytes[j++] = c0 << 2 | c1 >> 4;
       bytes[j++] = c1 << 4 | c2 >> 2;
       bytes[j++] = c2 << 6 | c3;
@@ -579,6 +579,49 @@ async function getAslTimecodes(bcv) {
   const result = await fetchAslTimecodes(bookNum, chapter, startVerse, endVerse);
   return result ?? void 0;
 }
+function parseBcvPart(bcv) {
+  return {
+    book: parseInt(bcv.substring(0, 2), 10),
+    chapter: parseInt(bcv.substring(2, 5), 10),
+    verse: parseInt(bcv.substring(5, 8), 10)
+  };
+}
+function buildOfflineCitation(range) {
+  const [startRaw, endRaw] = range.includes("-") ? range.split("-") : [range, range];
+  const start = parseBcvPart(startRaw);
+  const end = parseBcvPart(endRaw);
+  if (start.book === end.book && start.chapter === end.chapter && start.verse === end.verse) {
+    return `${start.chapter}:${start.verse}`;
+  }
+  if (start.book === end.book && start.chapter === end.chapter) {
+    return `${start.chapter}:${start.verse}-${end.verse}`;
+  }
+  return `${start.chapter}:${start.verse}-${end.chapter}:${end.verse}`;
+}
+async function fetchVerseWithExtrasOfflineFirst(range, langCode, offlineRepo, signal) {
+  if (signal?.aborted) return null;
+  if (offlineRepo) {
+    try {
+      const [startRaw, endRaw] = range.includes("-") ? range.split("-") : [range, range];
+      const start = parseBcvPart(startRaw);
+      const end = parseBcvPart(endRaw);
+      if (start.book === end.book && start.chapter === end.chapter) {
+        const text = await offlineRepo.getVerseRange(langCode, start.book, start.chapter, start.verse, end.verse);
+        if (text) {
+          return {
+            html: `<p>${text}</p>`,
+            citation: buildOfflineCitation(range),
+            footnotes: [],
+            crossReferences: [],
+            commentaries: []
+          };
+        }
+      }
+    } catch (_) {
+    }
+  }
+  return fetchVerseWithExtras(range, langCode, signal);
+}
 
 // modal.ts
 var import_obsidian2 = require("obsidian");
@@ -718,7 +761,7 @@ ${text}`);
     body.querySelectorAll(".traverture-xref-marker").forEach((marker) => {
       const el = marker;
       const xrefId = parseInt(el.getAttribute("data-xref-id") || "0");
-      const xref = verseData.crossReferences?.find((x) => x.id === xrefId);
+      const xref = verseData.crossReferences?.find((x2) => x2.id === xrefId);
       if (xref) {
         const targets = xref.targets.map((t) => t.standardCitation.replace(/&nbsp;/g, " ")).join("; ");
         el.setAttribute("title", targets);
@@ -847,6 +890,89 @@ ${noteText}
 
 // editor.ts
 var import_view = require("@codemirror/view");
+
+// relativeRefs.ts
+function toBcv(book, chapter, verse) {
+  return `${String(book).padStart(2, "0")}${String(chapter).padStart(3, "0")}${String(verse).padStart(3, "0")}`;
+}
+function parseRange(s) {
+  const parts = s.split("-");
+  const a = parseInt(parts[0], 10);
+  const b = parts.length > 1 ? parseInt(parts[1], 10) : a;
+  return [a, b];
+}
+function augmentClauses(text, clauses) {
+  if (!clauses || clauses.length === 0) return clauses;
+  const absIntervals = clauses.map((c) => [c[1], c[2]]);
+  const overlapsAbs = (s, e) => absIntervals.some(([a, b]) => s < b && e > a);
+  const candidates = [];
+  const vRegex = /\bv\.?\s*(\d+(?:-\d+)?)\b/gi;
+  let m;
+  while ((m = vRegex.exec(text)) !== null) {
+    candidates.push({ start: m.index, end: m.index + m[0].length, kind: "v", payload: m[1] });
+  }
+  const verseWordRegex = /\bverses?\s+(\d+(?:-\d+)?)\b/gi;
+  while ((m = verseWordRegex.exec(text)) !== null) {
+    candidates.push({ start: m.index, end: m.index + m[0].length, kind: "v", payload: m[1] });
+  }
+  const cRegex = /\b(\d{1,3}):(\d{1,3}(?:-\d{1,3})?)\b/g;
+  while ((m = cRegex.exec(text)) !== null) {
+    const ch = parseInt(m[1], 10);
+    if (ch < 1 || ch > 150) continue;
+    candidates.push({ start: m.index, end: m.index + m[0].length, kind: "c", payload: `${m[1]}:${m[2]}` });
+  }
+  candidates.sort((a, b) => a.start - b.start);
+  const chosen = [];
+  for (const c of candidates) {
+    if (overlapsAbs(c.start, c.end)) continue;
+    if (chosen.some((x2) => c.start < x2.end && c.end > x2.start)) continue;
+    chosen.push(c);
+  }
+  const absItems = clauses.map((c) => {
+    const bcv = c[3] && c[3][0] && c[3][0][0] ? c[3][0][0] : "";
+    return {
+      start: c[1],
+      end: c[2],
+      book: bcv ? parseInt(bcv.substring(0, 2), 10) : -1,
+      chapter: bcv ? parseInt(bcv.substring(2, 5), 10) : -1
+    };
+  });
+  const merged = [
+    ...absItems.map((a) => ({ type: "abs", start: a.start, end: a.end, book: a.book, chapter: a.chapter })),
+    ...chosen.map((c) => ({ type: "rel", start: c.start, end: c.end, kind: c.kind, payload: c.payload }))
+  ].sort((a, b) => a.start - b.start);
+  let lastBook = -1;
+  let lastChapter = -1;
+  const synthetic = [];
+  for (const item of merged) {
+    if (item.type === "abs") {
+      if (item.book > 0) lastBook = item.book;
+      if (item.chapter > 0) lastChapter = item.chapter;
+      continue;
+    }
+    if (lastBook <= 0 || lastChapter <= 0) continue;
+    const originalText = text.substring(item.start, item.end);
+    let bcv = "";
+    if (item.kind === "v") {
+      const [sv, ev] = parseRange(item.payload);
+      const startBcv = toBcv(lastBook, lastChapter, sv);
+      const endBcv = toBcv(lastBook, lastChapter, ev);
+      bcv = startBcv === endBcv ? startBcv : `${startBcv}-${endBcv}`;
+    } else {
+      const [chapStr, verseStr] = item.payload.split(":");
+      const chapter = parseInt(chapStr, 10);
+      const [sv, ev] = parseRange(verseStr);
+      const startBcv = toBcv(lastBook, chapter, sv);
+      const endBcv = toBcv(lastBook, chapter, ev);
+      bcv = startBcv === endBcv ? startBcv : `${startBcv}-${endBcv}`;
+      lastChapter = chapter;
+    }
+    synthetic.push([originalText, item.start, item.end, [[bcv, bcv]]]);
+  }
+  return [...clauses, ...synthetic].sort((a, b) => a[1] - b[1]);
+}
+
+// editor.ts
 var import_state = require("@codemirror/state");
 var REF_PATTERN = /\{\{(.+?)\}\}/g;
 function buildDecorations(view, plugin) {
@@ -872,7 +998,8 @@ function buildDecorations(view, plugin) {
       const engineInput = cleanMatch.replace("{{", "\u27EA\u27EA").replace("}}", "\u27EB\u27EB");
       const parsed = plugin.safeParse?.(engineInput);
       if (!parsed) continue;
-      const clauses = JSON.parse(parsed);
+      let clauses = JSON.parse(parsed);
+      clauses = augmentClauses(engineInput, clauses);
       const sorted = [...clauses].sort((a, b) => b[0].length - a[0].length);
       for (const clause of sorted) {
         const [clauseText, , , ranges] = clause;
@@ -897,30 +1024,23 @@ function buildDecorations(view, plugin) {
       const decoratedRanges = [...decorated].sort((a, b) => a.from - b.from);
       let pos = from;
       for (const d of decoratedRanges) {
-        if (pos < d.from) {
-          const segment = view.state.doc.sliceString(pos, d.from);
-          processSegment(pos, segment, plugin, allDecos, decorated, bcvs);
-        }
+        if (pos < d.from) processSegment(pos, view.state.doc.sliceString(pos, d.from), plugin, allDecos, decorated, bcvs);
         pos = Math.max(pos, d.to);
       }
-      if (pos < to) {
-        const segment = view.state.doc.sliceString(pos, to);
-        processSegment(pos, segment, plugin, allDecos, decorated, bcvs);
-      }
+      if (pos < to) processSegment(pos, view.state.doc.sliceString(pos, to), plugin, allDecos, decorated, bcvs);
     }
   }
   allDecos.sort((a, b) => a.from - b.from);
   const builder = new import_state.RangeSetBuilder();
-  for (const d of allDecos) {
-    builder.add(d.from, d.to, d.deco);
-  }
+  for (const d of allDecos) builder.add(d.from, d.to, d.deco);
   plugin._editBcvs = bcvs;
   return builder.finish();
 }
 function processSegment(basePos, segment, plugin, allDecos, decorated, bcvs) {
   const parsed = plugin.safeParse?.(segment);
   if (!parsed) return;
-  const clauses = JSON.parse(parsed);
+  let clauses = JSON.parse(parsed);
+  clauses = augmentClauses(segment, clauses);
   if (clauses.length === 0) return;
   for (const clause of clauses) {
     const [, startPos, endPos, ranges] = clause;
@@ -944,9 +1064,7 @@ function createTravertureEditorPlugin(plugin) {
         this.decorations = buildDecorations(view, plugin);
       }
       update(update) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
-          this.decorations = buildDecorations(update.view, plugin);
-        }
+        if (update.docChanged || update.selectionSet || update.viewportChanged) this.decorations = buildDecorations(update.view, plugin);
       }
     },
     {
@@ -960,12 +1078,37 @@ function createTravertureEditorPlugin(plugin) {
           if (entry) {
             e.preventDefault();
             e.stopPropagation();
-            void showModal(plugin, entry.bcv);
+            void (async () => {
+              if (await openExternalReference(plugin, entry.bcv)) return;
+              await showModal(plugin, entry.bcv);
+            })();
           }
         }
       }
     }
   );
+}
+async function openExternalReference(plugin, bcv) {
+  const scheme = plugin.settings.linkScheme ?? "popup";
+  if (scheme !== "jwlibrary" && scheme !== "jworg") return false;
+  const langObj = getAvailableLanguages().find((l) => l.code === plugin.settings.outputLanguage);
+  const langSymbol = langObj ? plugin.engine.constructor.get_lang_symbol(plugin.settings.outputLanguage) : "E";
+  const timecodes = plugin.settings.outputLanguage === "ase" ? await getAslTimecodes(bcv) : void 0;
+  const query = timecodes ? `?wtlocale=${langSymbol}&bible=${bcv}&ts=${timecodes}` : `?wtlocale=${langSymbol}&bible=${bcv}`;
+  const url = scheme === "jwlibrary" ? `jwlibrary:///finder${query}` : `https://www.jw.org/finder${query}`;
+  try {
+    const maybeRequire = window.require;
+    if (maybeRequire) {
+      const { shell } = maybeRequire("electron");
+      await shell.openExternal(url);
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+    return true;
+  } catch (error) {
+    console.error("Failed to open external scripture link:", error);
+    return false;
+  }
 }
 async function showModal(plugin, bcv) {
   const parts = bcv.split("-");
@@ -977,7 +1120,7 @@ async function showModal(plugin, bcv) {
   const timecodes = plugin.settings.outputLanguage === "ase" ? await getAslTimecodes(bcv) : void 0;
   const modal = new VerseModal();
   modal.show({ html: `<p><em>Loading...</em></p>`, citation: displayText }, bcv, plugin.settings.outputLanguage, displayText, timecodes);
-  void fetchVerseWithExtras(bcv, plugin.settings.outputLanguage, modal.getSignal()).then((verseData) => {
+  void fetchVerseWithExtrasOfflineFirst(bcv, plugin.settings.outputLanguage, plugin.offlineRepo, modal.getSignal()).then((verseData) => {
     if (!modal.isVisible()) return;
     modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: displayText }, bcv, plugin.settings.outputLanguage, displayText, timecodes);
   });
@@ -990,28 +1133,57 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
-  getSettingDefinitions() {
-    return [
-      { key: "sourceLanguage", name: "Source language", description: "Language of the scripture references in your notes", type: "dropdown", defaultValue: "en" },
-      { key: "outputLanguage", name: "Output language", description: "Language for displaying book names and fetching verse text", type: "dropdown", defaultValue: "en" },
-      { key: "autoDetect", name: "Auto-detect references", description: "Automatically detect scripture references without {{ }} markers", type: "toggle", defaultValue: true },
-      { key: "titleFormat", name: "Modal title format", description: "How scripture references are displayed in the verse modal title", type: "dropdown", defaultValue: "full" }
-    ];
+  async chooseAndImportEpub(overwriteExisting = false) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".epub,application/epub+zip";
+    input.style.display = "none";
+    const done = new Promise((resolve) => {
+      input.onchange = async () => {
+        try {
+          const file = input.files?.[0];
+          if (!file) return;
+          if (!this.plugin.epubImportService) {
+            new import_obsidian3.Notice("EPUB importer not initialized.");
+            return;
+          }
+          const data = new Uint8Array(await file.arrayBuffer());
+          const result = await this.plugin.epubImportService.importEpub(
+            data,
+            file.name,
+            overwriteExisting
+          );
+          if (!result.success) {
+            new import_obsidian3.Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
+          } else {
+            new import_obsidian3.Notice(`Imported offline corpus: ${result.metadata?.language}`);
+          }
+        } finally {
+          input.remove();
+          resolve();
+        }
+      };
+    });
+    document.body.appendChild(input);
+    input.click();
+    await done;
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
     const headerEl = containerEl.createDiv({ cls: "traverture-settings-header" });
     headerEl.createSpan({ text: "tra.VER:ture", cls: "traverture-settings-title" });
-    const engineVersion = TravertureEngine.get_version();
     headerEl.createSpan({
-      text: `v${this.plugin.manifest.version} \u2013 ${engineVersion}`,
+      text: `v${this.plugin.manifest.version}`,
       cls: "traverture-version-info"
     });
     const languages = getAvailableLanguages();
     new import_obsidian3.Setting(containerEl).setName("Source language").setDesc("Language of the scripture references in your notes").addDropdown((dropdown) => {
-      for (const lang of languages.filter((l) => l.code !== "ase")) {
-        dropdown.addOption(lang.code, `${lang.vernacularName} (${lang.code})`);
+      for (const language of languages.filter((item) => item.code !== "ase")) {
+        dropdown.addOption(
+          language.code,
+          `${language.vernacularName} (${language.code})`
+        );
       }
       dropdown.setValue(this.plugin.settings.sourceLanguage).onChange(async (value) => {
         this.plugin.settings.sourceLanguage = value;
@@ -1020,7 +1192,12 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
       });
     });
     new import_obsidian3.Setting(containerEl).setName("Output language").setDesc("Language for displaying and fetching scripture text").addDropdown((dropdown) => {
-      for (const lang of languages) dropdown.addOption(lang.code, `${lang.vernacularName} (${lang.code})`);
+      for (const language of languages) {
+        dropdown.addOption(
+          language.code,
+          `${language.vernacularName} (${language.code})`
+        );
+      }
       dropdown.setValue(this.plugin.settings.outputLanguage).onChange(async (value) => {
         this.plugin.settings.outputLanguage = value;
         await this.plugin.saveSettings();
@@ -1036,10 +1213,54 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian3.Setting(containerEl).setName("Auto-detect references").setDesc("Automatically detect scripture references in View mode without {{ }} markers.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoDetect).onChange(async (value) => {
-      this.plugin.settings.autoDetect = value;
-      await this.plugin.saveSettings();
-    }));
+    new import_obsidian3.Setting(containerEl).setName("Auto-detect references").setDesc("Automatically detect scripture references in View mode without {{ }} markers.").addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.autoDetect).onChange(async (value) => {
+        this.plugin.settings.autoDetect = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian3.Setting(containerEl).setName("JW link scheme").setDesc("Choose how scripture links are opened: popup (modal preview), JW Library app, or JW.org.").addDropdown((dropdown) => {
+      dropdown.addOption("popup", "Popup preview (modal)");
+      dropdown.addOption(
+        "jwlibrary",
+        "Open via jwlibrary:// (native JW Library app)"
+      );
+      dropdown.addOption("jworg", "Open via jworg:// (JW.org handler)");
+      const scheme = this.plugin.settings.linkScheme === "jworg" ? "jworg" : this.plugin.settings.linkScheme === "popup" ? "popup" : "jwlibrary";
+      dropdown.setValue(scheme).onChange(async (value) => {
+        this.plugin.settings.linkScheme = value === "jworg" ? "jworg" : value === "popup" ? "popup" : "jwlibrary";
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian3.Setting(containerEl).setName("Import EPUB for offline lookup").setDesc("Upload an EPUB file to enable offline citation lookup stored in the vault.").addButton(
+      (button) => button.setButtonText("Import EPUB").onClick(async () => {
+        await this.chooseAndImportEpub(false);
+        this.display();
+      })
+    );
+    const activeLanguage = this.plugin.settings.outputLanguage;
+    void this.renderOfflineCorpusSetting(containerEl, activeLanguage);
+  }
+  async renderOfflineCorpusSetting(containerEl, activeLanguage) {
+    const metadata = await this.plugin.offlineRepo?.getMetadata(activeLanguage);
+    new import_obsidian3.Setting(containerEl).setName("Offline EPUB corpus").setDesc(
+      metadata ? `Current offline corpus for ${activeLanguage}: ${metadata.fileName} (${metadata.chapterCount ?? 0} chapters)` : `No offline corpus imported for ${activeLanguage}.`
+    ).addButton(
+      (button) => button.setButtonText("Replace EPUB").setDisabled(!metadata).onClick(async () => {
+        await this.chooseAndImportEpub(true);
+        this.display();
+      })
+    ).addButton(
+      (button) => button.setButtonText("Delete EPUB").setWarning().setDisabled(!metadata).onClick(async () => {
+        if (!this.plugin.offlineRepo) {
+          new import_obsidian3.Notice("Offline EPUB repository not initialized.");
+          return;
+        }
+        await this.plugin.offlineRepo.removeLanguage(activeLanguage);
+        new import_obsidian3.Notice(`Deleted offline corpus for ${activeLanguage}.`);
+        this.display();
+      })
+    );
   }
 };
 
@@ -1051,7 +1272,9 @@ var DEFAULT_SETTINGS = {
   sourceLanguage: "en",
   outputLanguage: "en",
   autoDetect: true,
-  titleFormat: "full"
+  titleFormat: "full",
+  linkScheme: "popup",
+  offlineEpubEnabled: true
 };
 var VIEW_TYPE_TRAVERTURE_SIDEBAR = "traverture-sidebar-view";
 
@@ -1270,9 +1493,8 @@ ${body}`);
       const cb = label.createEl("input", { type: "checkbox" });
       cb.checked = this.visibleColumns.has(col.key);
       cb.addEventListener("change", () => {
-        if (cb.checked) {
-          this.visibleColumns.add(col.key);
-        } else {
+        if (cb.checked) this.visibleColumns.add(col.key);
+        else {
           const remaining = [...this.visibleColumns].filter((k) => k !== col.key);
           if (remaining.length === 0) {
             cb.checked = true;
@@ -1314,16 +1536,16 @@ ${body}`);
     for (const ref of refs) {
       const row = tbody.createEl("tr");
       for (const col of visibleCols) {
-        const td = row.createEl("td", { cls: "traverture-sidebar-td" });
-        td.style.textAlign = col.align;
-        if (col.mono) td.addClass("traverture-mono");
+        const td2 = row.createEl("td", { cls: "traverture-sidebar-td" });
+        td2.style.textAlign = col.align;
+        if (col.mono) td2.addClass("traverture-mono");
         let displayVal;
         if (col.key === "fullRef") displayVal = this.getDisplayRef(ref, "full");
         else if (col.key === "standardRef") displayVal = this.getDisplayRef(ref, "standard");
         else if (col.key === "officialRef") displayVal = this.getDisplayRef(ref, "official");
         else displayVal = String(ref[col.key] ?? "");
         if (col.key === "fullRef" || col.key === "standardRef" || col.key === "officialRef") {
-          const link = td.createEl("a", { text: displayVal, cls: "traverture-ref-link" });
+          const link = td2.createEl("a", { text: displayVal, cls: "traverture-ref-link" });
           const bcv = ref.startBcv === ref.endBcv ? ref.startBcv : `${ref.startBcv}-${ref.endBcv}`;
           link.setAttribute("data-bcv", bcv);
           link.setAttribute("data-ref", displayVal);
@@ -1332,16 +1554,36 @@ ${body}`);
               if (e.button !== 0) return;
               e.preventDefault();
               e.stopPropagation();
+              const scheme = this.plugin.settings.linkScheme ?? "popup";
+              if (scheme === "jwlibrary" || scheme === "jworg") {
+                const langObj = getAvailableLanguages().find((l) => l.code === this.plugin.settings.outputLanguage);
+                const langSymbol = langObj ? TravertureEngine.get_lang_symbol(this.plugin.settings.outputLanguage) : "E";
+                const timecodes2 = this.plugin.settings.outputLanguage === "ase" ? await getAslTimecodes(bcv) : void 0;
+                const query = timecodes2 ? `?wtlocale=${langSymbol}&bible=${bcv}&ts=${timecodes2}` : `?wtlocale=${langSymbol}&bible=${bcv}`;
+                const url = scheme === "jwlibrary" ? `jwlibrary:///finder${query}` : `https://www.jw.org/finder${query}`;
+                try {
+                  const maybeRequire = window.require;
+                  if (maybeRequire) {
+                    const { shell } = maybeRequire("electron");
+                    await shell.openExternal(url);
+                  } else {
+                    window.open(url, "_blank", "noopener");
+                  }
+                } catch (error) {
+                  console.error("Failed to open external scripture link:", error);
+                }
+                return;
+              }
               const timecodes = this.outputLang === "ase" ? await getAslTimecodes(bcv) : void 0;
               const modal = new VerseModal();
               modal.show({ html: `<p><em>Loading...</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
-              const verseData = await fetchVerseWithExtras(bcv, this.outputLang, modal.getSignal());
+              const verseData = await fetchVerseWithExtrasOfflineFirst(bcv, this.outputLang, this.plugin.offlineRepo, modal.getSignal());
               if (!modal.isVisible()) return;
               modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
             })();
           });
         } else {
-          td.setText(displayVal);
+          td2.setText(displayVal);
         }
       }
     }
@@ -1353,6 +1595,795 @@ ${body}`);
   }
 };
 
+// VaultOfflineEpubRepository.ts
+var VaultOfflineEpubRepository = class {
+  constructor(app, pluginId) {
+    this.app = app;
+    this.pluginId = pluginId;
+    this.basePath = `.${pluginId}/offline-epub`;
+  }
+  async ensureFolder(path) {
+    try {
+      await this.app.vault.createFolder(path);
+    } catch (_) {
+    }
+  }
+  getMetadataPath(language) {
+    return `${this.basePath}/${language}.metadata.json`;
+  }
+  getIndexPath(language) {
+    return `${this.basePath}/${language}.index.json`;
+  }
+  getLegacyCorpusPath(language) {
+    return `${this.basePath}/${language}.corpus.json`;
+  }
+  getChapterPath(language, book, chapter) {
+    const bookKey = String(book).padStart(3, "0");
+    const chapterKey = String(chapter).padStart(3, "0");
+    return `${this.basePath}/${language}/${bookKey}/${chapterKey}.json`;
+  }
+  async ensureChapterFolder(language, book) {
+    await this.ensureFolder(this.basePath);
+    await this.ensureFolder(`${this.basePath}/${language}`);
+    await this.ensureFolder(`${this.basePath}/${language}/${String(book).padStart(3, "0")}`);
+  }
+  async saveCorpus(metadata, chapters) {
+    const normalizedMetadata = {
+      ...metadata,
+      importedAt: metadata.importedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      chapterCount: metadata.chapterCount ?? chapters.length
+    };
+    await this.ensureFolder(this.basePath);
+    await this.app.vault.adapter.write(this.getMetadataPath(metadata.language), JSON.stringify(normalizedMetadata, null, 2));
+    const index = chapters.map((chapter) => ({
+      language: chapter.language,
+      book: chapter.book,
+      chapter: chapter.chapter,
+      title: chapter.title ?? ""
+    }));
+    await this.app.vault.adapter.write(this.getIndexPath(metadata.language), JSON.stringify(index, null, 2));
+    for (const chapter of chapters) {
+      await this.saveChapter(metadata.language, chapter);
+    }
+    try {
+      await this.app.vault.adapter.remove(this.getLegacyCorpusPath(metadata.language));
+    } catch (_) {
+    }
+  }
+  async saveChapter(language, chapter) {
+    await this.ensureChapterFolder(language, chapter.book);
+    const chapterPath = this.getChapterPath(language, chapter.book, chapter.chapter);
+    await this.app.vault.adapter.write(chapterPath, JSON.stringify(chapter, null, 2));
+  }
+  async getMetadata(language) {
+    try {
+      const text = await this.app.vault.adapter.read(this.getMetadataPath(language));
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  }
+  async hasLanguage(language) {
+    return await this.getMetadata(language) !== null;
+  }
+  async getCorpusIndex(language) {
+    try {
+      const text = await this.app.vault.adapter.read(this.getIndexPath(language));
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  }
+  async getCorpus(language) {
+    const index = await this.getCorpusIndex(language);
+    if (index && index.length > 0) {
+      const chapters = [];
+      for (const entry of index) {
+        const chapter = await this.getChapter(language, entry.book, entry.chapter);
+        if (chapter) chapters.push(chapter);
+      }
+      return chapters;
+    }
+    try {
+      const text = await this.app.vault.adapter.read(this.getLegacyCorpusPath(language));
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  }
+  async getChapter(language, book, chapter) {
+    try {
+      const text = await this.app.vault.adapter.read(this.getChapterPath(language, book, chapter));
+      return JSON.parse(text);
+    } catch (_) {
+      const corpus = await this.getCorpus(language);
+      if (!corpus) return null;
+      return corpus.find((entry) => String(entry.book) === String(book) && String(entry.chapter) === String(chapter)) ?? null;
+    }
+  }
+  async getVerseRange(language, book, chapter, verseStart, verseEnd) {
+    const chapterData = await this.getChapter(language, book, chapter);
+    if (!chapterData?.verses) return null;
+    const end = verseEnd ?? verseStart;
+    const verses = [];
+    for (let verse = verseStart; verse <= end; verse++) {
+      const text = chapterData.verses[String(verse)];
+      if (text) verses.push(text.trim());
+    }
+    return verses.length > 0 ? verses.join(" ") : null;
+  }
+  async listLanguages() {
+    try {
+      const items = await this.app.vault.adapter.list(this.basePath);
+      return items.files.map((file) => file.split("/").pop() || "").filter((name) => name.endsWith(".metadata.json")).map((name) => name.replace(/\.metadata\.json$/, ""));
+    } catch (_) {
+      return [];
+    }
+  }
+  async removeLanguage(language) {
+    const paths = [
+      this.getMetadataPath(language),
+      this.getIndexPath(language),
+      this.getLegacyCorpusPath(language)
+    ];
+    for (const path of paths) {
+      try {
+        await this.app.vault.adapter.remove(path);
+      } catch (_) {
+      }
+    }
+    const languageFolder = `${this.basePath}/${language}`;
+    try {
+      const listed = await this.app.vault.adapter.list(languageFolder);
+      for (const file of listed.files) {
+        try {
+          await this.app.vault.adapter.remove(file);
+        } catch (_) {
+        }
+      }
+      const folders = [...listed.folders].sort((a, b) => b.length - a.length);
+      for (const folder of folders) {
+        try {
+          await this.app.vault.adapter.rmdir(folder, true);
+        } catch (_) {
+        }
+      }
+      await this.app.vault.adapter.rmdir(languageFolder, true);
+    } catch (_) {
+    }
+  }
+};
+
+// node_modules/fflate/esm/browser.js
+var u8 = Uint8Array;
+var u16 = Uint16Array;
+var i32 = Int32Array;
+var fleb = new u8([
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  1,
+  2,
+  2,
+  2,
+  2,
+  3,
+  3,
+  3,
+  3,
+  4,
+  4,
+  4,
+  4,
+  5,
+  5,
+  5,
+  5,
+  0,
+  /* unused */
+  0,
+  0,
+  /* impossible */
+  0
+]);
+var fdeb = new u8([
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  2,
+  2,
+  3,
+  3,
+  4,
+  4,
+  5,
+  5,
+  6,
+  6,
+  7,
+  7,
+  8,
+  8,
+  9,
+  9,
+  10,
+  10,
+  11,
+  11,
+  12,
+  12,
+  13,
+  13,
+  /* unused */
+  0,
+  0
+]);
+var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+var freb = function(eb, start) {
+  var b = new u16(31);
+  for (var i2 = 0; i2 < 31; ++i2) {
+    b[i2] = start += 1 << eb[i2 - 1];
+  }
+  var r = new i32(b[30]);
+  for (var i2 = 1; i2 < 30; ++i2) {
+    for (var j = b[i2]; j < b[i2 + 1]; ++j) {
+      r[j] = j - b[i2] << 5 | i2;
+    }
+  }
+  return { b, r };
+};
+var _a = freb(fleb, 2);
+var fl = _a.b;
+var revfl = _a.r;
+fl[28] = 258, revfl[258] = 28;
+var _b = freb(fdeb, 0);
+var fd = _b.b;
+var revfd = _b.r;
+var rev = new u16(32768);
+for (i = 0; i < 32768; ++i) {
+  x = (i & 43690) >> 1 | (i & 21845) << 1;
+  x = (x & 52428) >> 2 | (x & 13107) << 2;
+  x = (x & 61680) >> 4 | (x & 3855) << 4;
+  rev[i] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
+}
+var x;
+var i;
+var hMap = (function(cd, mb, r) {
+  var s = cd.length;
+  var i2 = 0;
+  var l = new u16(mb);
+  for (; i2 < s; ++i2) {
+    if (cd[i2])
+      ++l[cd[i2] - 1];
+  }
+  var le = new u16(mb);
+  for (i2 = 1; i2 < mb; ++i2) {
+    le[i2] = le[i2 - 1] + l[i2 - 1] << 1;
+  }
+  var co;
+  if (r) {
+    co = new u16(1 << mb);
+    var rvb = 15 - mb;
+    for (i2 = 0; i2 < s; ++i2) {
+      if (cd[i2]) {
+        var sv = i2 << 4 | cd[i2];
+        var r_1 = mb - cd[i2];
+        var v = le[cd[i2] - 1]++ << r_1;
+        for (var m = v | (1 << r_1) - 1; v <= m; ++v) {
+          co[rev[v] >> rvb] = sv;
+        }
+      }
+    }
+  } else {
+    co = new u16(s);
+    for (i2 = 0; i2 < s; ++i2) {
+      if (cd[i2]) {
+        co[i2] = rev[le[cd[i2] - 1]++] >> 15 - cd[i2];
+      }
+    }
+  }
+  return co;
+});
+var flt = new u8(288);
+for (i = 0; i < 144; ++i)
+  flt[i] = 8;
+var i;
+for (i = 144; i < 256; ++i)
+  flt[i] = 9;
+var i;
+for (i = 256; i < 280; ++i)
+  flt[i] = 7;
+var i;
+for (i = 280; i < 288; ++i)
+  flt[i] = 8;
+var i;
+var fdt = new u8(32);
+for (i = 0; i < 32; ++i)
+  fdt[i] = 5;
+var i;
+var flrm = /* @__PURE__ */ hMap(flt, 9, 1);
+var fdrm = /* @__PURE__ */ hMap(fdt, 5, 1);
+var max = function(a) {
+  var m = a[0];
+  for (var i2 = 1; i2 < a.length; ++i2) {
+    if (a[i2] > m)
+      m = a[i2];
+  }
+  return m;
+};
+var bits = function(d, p, m) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8) >> (p & 7) & m;
+};
+var bits16 = function(d, p) {
+  var o = p / 8 | 0;
+  return (d[o] | d[o + 1] << 8 | d[o + 2] << 16) >> (p & 7);
+};
+var shft = function(p) {
+  return (p + 7) / 8 | 0;
+};
+var slc = function(v, s, e) {
+  if (s == null || s < 0)
+    s = 0;
+  if (e == null || e > v.length)
+    e = v.length;
+  return new u8(v.subarray(s, e));
+};
+var ec = [
+  "unexpected EOF",
+  "invalid block type",
+  "invalid length/literal",
+  "invalid distance",
+  "stream finished",
+  "no stream handler",
+  ,
+  // determined by compression function
+  "no callback",
+  "invalid UTF-8 data",
+  "extra field too long",
+  "date not in range 1980-2099",
+  "filename too long",
+  "stream finishing",
+  "invalid zip data"
+  // determined by unknown compression method
+];
+var err = function(ind, msg, nt) {
+  var e = new Error(msg || ec[ind]);
+  e.code = ind;
+  if (Error.captureStackTrace)
+    Error.captureStackTrace(e, err);
+  if (!nt)
+    throw e;
+  return e;
+};
+var inflt = function(dat, st, buf, dict) {
+  var sl = dat.length, dl = dict ? dict.length : 0;
+  if (!sl || st.f && !st.l)
+    return buf || new u8(0);
+  var noBuf = !buf;
+  var resize = noBuf || st.i != 2;
+  var noSt = st.i;
+  if (noBuf)
+    buf = new u8(sl * 3);
+  var cbuf = function(l2) {
+    var bl = buf.length;
+    if (l2 > bl) {
+      var nbuf = new u8(Math.max(bl * 2, l2));
+      nbuf.set(buf);
+      buf = nbuf;
+    }
+  };
+  var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, lm = st.l, dm = st.d, lbt = st.m, dbt = st.n;
+  var tbts = sl * 8;
+  do {
+    if (!lm) {
+      final = bits(dat, pos, 1);
+      var type = bits(dat, pos + 1, 3);
+      pos += 3;
+      if (!type) {
+        var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
+        if (t > sl) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + l);
+        buf.set(dat.subarray(s, t), bt);
+        st.b = bt += l, st.p = pos = t * 8, st.f = final;
+        continue;
+      } else if (type == 1)
+        lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
+      else if (type == 2) {
+        var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
+        var tl = hLit + bits(dat, pos + 5, 31) + 1;
+        pos += 14;
+        var ldt = new u8(tl);
+        var clt = new u8(19);
+        for (var i2 = 0; i2 < hcLen; ++i2) {
+          clt[clim[i2]] = bits(dat, pos + i2 * 3, 7);
+        }
+        pos += hcLen * 3;
+        var clb = max(clt), clbmsk = (1 << clb) - 1;
+        var clm = hMap(clt, clb, 1);
+        for (var i2 = 0; i2 < tl; ) {
+          var r = clm[bits(dat, pos, clbmsk)];
+          pos += r & 15;
+          var s = r >> 4;
+          if (s < 16) {
+            ldt[i2++] = s;
+          } else {
+            var c = 0, n = 0;
+            if (s == 16)
+              n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i2 - 1];
+            else if (s == 17)
+              n = 3 + bits(dat, pos, 7), pos += 3;
+            else if (s == 18)
+              n = 11 + bits(dat, pos, 127), pos += 7;
+            while (n--)
+              ldt[i2++] = c;
+          }
+        }
+        var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
+        lbt = max(lt);
+        dbt = max(dt);
+        lm = hMap(lt, lbt, 1);
+        dm = hMap(dt, dbt, 1);
+      } else
+        err(1);
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+    }
+    if (resize)
+      cbuf(bt + 131072);
+    var lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
+    var lpos = pos;
+    for (; ; lpos = pos) {
+      var c = lm[bits16(dat, pos) & lms], sym = c >> 4;
+      pos += c & 15;
+      if (pos > tbts) {
+        if (noSt)
+          err(0);
+        break;
+      }
+      if (!c)
+        err(2);
+      if (sym < 256)
+        buf[bt++] = sym;
+      else if (sym == 256) {
+        lpos = pos, lm = null;
+        break;
+      } else {
+        var add = sym - 254;
+        if (sym > 264) {
+          var i2 = sym - 257, b = fleb[i2];
+          add = bits(dat, pos, (1 << b) - 1) + fl[i2];
+          pos += b;
+        }
+        var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
+        if (!d)
+          err(3);
+        pos += d & 15;
+        var dt = fd[dsym];
+        if (dsym > 3) {
+          var b = fdeb[dsym];
+          dt += bits16(dat, pos) & (1 << b) - 1, pos += b;
+        }
+        if (pos > tbts) {
+          if (noSt)
+            err(0);
+          break;
+        }
+        if (resize)
+          cbuf(bt + 131072);
+        var end = bt + add;
+        if (bt < dt) {
+          var shift = dl - dt, dend = Math.min(dt, end);
+          if (shift + bt < 0)
+            err(3);
+          for (; bt < dend; ++bt)
+            buf[bt] = dict[shift + bt];
+        }
+        for (; bt < end; ++bt)
+          buf[bt] = buf[bt - dt];
+      }
+    }
+    st.l = lm, st.p = lpos, st.b = bt, st.f = final;
+    if (lm)
+      final = 1, st.m = lbt, st.d = dm, st.n = dbt;
+  } while (!final);
+  return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
+};
+var et = /* @__PURE__ */ new u8(0);
+var b2 = function(d, b) {
+  return d[b] | d[b + 1] << 8;
+};
+var b4 = function(d, b) {
+  return (d[b] | d[b + 1] << 8 | d[b + 2] << 16 | d[b + 3] << 24) >>> 0;
+};
+var b8 = function(d, b) {
+  return b4(d, b) + b4(d, b + 4) * 4294967296;
+};
+function inflateSync(data, opts) {
+  return inflt(data, { i: 2 }, opts && opts.out, opts && opts.dictionary);
+}
+var td = typeof TextDecoder != "undefined" && /* @__PURE__ */ new TextDecoder();
+var tds = 0;
+try {
+  td.decode(et, { stream: true });
+  tds = 1;
+} catch (e) {
+}
+var dutf8 = function(d) {
+  for (var r = "", i2 = 0; ; ) {
+    var c = d[i2++];
+    var eb = (c > 127) + (c > 223) + (c > 239);
+    if (i2 + eb > d.length)
+      return { s: r, r: slc(d, i2 - 1) };
+    if (!eb)
+      r += String.fromCharCode(c);
+    else if (eb == 3) {
+      c = ((c & 15) << 18 | (d[i2++] & 63) << 12 | (d[i2++] & 63) << 6 | d[i2++] & 63) - 65536, r += String.fromCharCode(55296 | c >> 10, 56320 | c & 1023);
+    } else if (eb & 1)
+      r += String.fromCharCode((c & 31) << 6 | d[i2++] & 63);
+    else
+      r += String.fromCharCode((c & 15) << 12 | (d[i2++] & 63) << 6 | d[i2++] & 63);
+  }
+};
+function strFromU8(dat, latin1) {
+  if (latin1) {
+    var r = "";
+    for (var i2 = 0; i2 < dat.length; i2 += 16384)
+      r += String.fromCharCode.apply(null, dat.subarray(i2, i2 + 16384));
+    return r;
+  } else if (td) {
+    return td.decode(dat);
+  } else {
+    var _a2 = dutf8(dat), s = _a2.s, r = _a2.r;
+    if (r.length)
+      err(8);
+    return s;
+  }
+}
+var slzh = function(d, b) {
+  return b + 30 + b2(d, b + 26) + b2(d, b + 28);
+};
+var zh = function(d, b, z) {
+  var fnl = b2(d, b + 28), efl = b2(d, b + 30), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl;
+  var _a2 = z64hs(d, es, efl, z, b4(d, b + 20), b4(d, b + 24), b4(d, b + 42)), sc = _a2[0], su = _a2[1], off = _a2[2];
+  return [b2(d, b + 10), sc, su, fn, es + efl + b2(d, b + 32), off];
+};
+var z64hs = function(d, b, l, z, sc, su, off) {
+  var nsc = sc == 4294967295, nsu = su == 4294967295, noff = off == 4294967295, e = b + l;
+  var nf = nsc + nsu + noff;
+  if (z && nf) {
+    for (; b + 4 < e; b += 4 + b2(d, b + 2)) {
+      if (b2(d, b) == 1) {
+        return [
+          nsc ? b8(d, b + 4 + 8 * nsu) : sc,
+          nsu ? b8(d, b + 4) : su,
+          noff ? b8(d, b + 4 + 8 * (nsu + nsc)) : off,
+          1
+        ];
+      }
+    }
+    if (z < 2)
+      err(13);
+  }
+  return [sc, su, off, 0];
+};
+function unzipSync(data, opts) {
+  var files = {};
+  var e = data.length - 22;
+  for (; b4(data, e) != 101010256; --e) {
+    if (!e || data.length - e > 65558)
+      err(13);
+  }
+  ;
+  var c = b2(data, e + 8);
+  if (!c)
+    return {};
+  var o = b4(data, e + 16);
+  var z = b4(data, e - 20) == 117853008;
+  if (z) {
+    var ze = b4(data, e - 12);
+    z = b4(data, ze) == 101075792;
+    if (z) {
+      c = b4(data, ze + 32);
+      o = b4(data, ze + 48);
+    }
+  }
+  var fltr = opts && opts.filter;
+  for (var i2 = 0; i2 < c; ++i2) {
+    var _a2 = zh(data, o, z), c_2 = _a2[0], sc = _a2[1], su = _a2[2], fn = _a2[3], no = _a2[4], off = _a2[5], b = slzh(data, off);
+    o = no;
+    if (!fltr || fltr({
+      name: fn,
+      size: sc,
+      originalSize: su,
+      compression: c_2
+    })) {
+      if (!c_2)
+        files[fn] = slc(data, b, b + sc);
+      else if (c_2 == 8)
+        files[fn] = inflateSync(data.subarray(b, b + sc), { out: new u8(su) });
+      else
+        err(14, "unknown compression type " + c_2);
+    }
+  }
+  return files;
+}
+
+// EpubImportService.ts
+function strFromU82(u82) {
+  return new TextDecoder().decode(u82);
+}
+async function webCryptoSha256(data) {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const arr = Array.from(new Uint8Array(digest));
+  return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function posixDirname(p) {
+  const idx = p.lastIndexOf("/");
+  if (idx === -1) return ".";
+  return p.substring(0, idx);
+}
+function posixJoin(a, b) {
+  if (b.startsWith("/")) return b;
+  if (!a || a === ".") return b;
+  return a.endsWith("/") ? `${a}${b}` : `${a}/${b}`;
+}
+function parseXml(text) {
+  return new DOMParser().parseFromString(text, "application/xml");
+}
+var EpubImportService = class {
+  constructor(repository) {
+    this.repository = repository;
+  }
+  getRootFilePath(archive) {
+    const container = archive.get("META-INF/container.xml");
+    if (!container) return null;
+    const match = container.match(/full-path="([^"]+)"/);
+    return match ? match[1] : null;
+  }
+  findNavPath(opfDoc, rootDir) {
+    const items = Array.from(opfDoc.getElementsByTagName("item"));
+    for (const item of items) {
+      const props = item.getAttribute("properties") || "";
+      const href = item.getAttribute("href");
+      if (props.includes("nav") && href) return posixJoin(rootDir, href);
+    }
+    for (const item of items) {
+      const href = item.getAttribute("href") || "";
+      if (href.toLowerCase().includes("nav")) return posixJoin(rootDir, href);
+    }
+    return null;
+  }
+  extractNavEntries(navContent) {
+    const doc = parseXml(navContent);
+    const anchors = Array.from(doc.querySelectorAll("nav a"));
+    return anchors.map((a) => ({
+      href: a.getAttribute("href") || "",
+      text: a.textContent?.trim() || ""
+    }));
+  }
+  parseBookAndChapter(entryText, index) {
+    const match = entryText.match(/^(.+?)\s+(\d+)$/);
+    if (match) {
+      const [, bookName, chapterNum] = match;
+      return { book: index + 1, chapter: parseInt(chapterNum, 10), title: `${bookName} ${chapterNum}` };
+    }
+    return { book: index + 1, chapter: 1, title: entryText || `Chapter ${index + 1}` };
+  }
+  extractVerses(doc) {
+    const verses = {};
+    const verseNodes = Array.from(doc.querySelectorAll("[id], [data-verse], .verse"));
+    for (const el of verseNodes) {
+      const candidates = [
+        el.getAttribute("data-verse"),
+        el.getAttribute("verse"),
+        el.getAttribute("id"),
+        el.getAttribute("name")
+      ].filter(Boolean);
+      for (const candidate of candidates) {
+        const m = candidate.match(/(?:verse[-_]?|v)?(\d{1,3})$/i);
+        if (!m) continue;
+        const verseNum = m[1];
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (text) {
+          verses[verseNum] = text;
+          break;
+        }
+      }
+    }
+    if (Object.keys(verses).length === 0) {
+      const text = (doc.documentElement?.textContent || "").replace(/\s+/g, " ").trim();
+      if (text) verses["1"] = text;
+    }
+    return verses;
+  }
+  async importEpub(fileData, sourceFileName = "imported.epub", overwriteExisting = false) {
+    try {
+      if (!fileData || fileData.length === 0) return { success: false, error: "No EPUB file provided." };
+      const checksum = `sha256:${await webCryptoSha256(fileData)}`;
+      const importedAt = (/* @__PURE__ */ new Date()).toISOString();
+      const raw = unzipSync(fileData);
+      const archive = new Map(Object.entries(raw).map(([p, v]) => [p, strFromU82(v)]));
+      const rootFile = this.getRootFilePath(archive);
+      if (!rootFile) return { success: false, error: "Invalid EPUB: missing container root." };
+      const rootDir = posixDirname(rootFile);
+      const opfText = archive.get(rootFile);
+      if (!opfText) return { success: false, error: "Invalid EPUB: missing package document." };
+      const opfDoc = parseXml(opfText);
+      const language = opfDoc.getElementsByTagName("dc:language")[0]?.textContent?.trim() || opfDoc.getElementsByTagName("language")[0]?.textContent?.trim() || "und";
+      const existing = await this.repository.getMetadata(language).catch(() => null);
+      if (existing && !overwriteExisting) {
+        return { success: false, error: `An offline corpus for ${language} already exists.` };
+      }
+      const navPath = this.findNavPath(opfDoc, rootDir);
+      const chapters = [];
+      if (navPath && archive.has(navPath)) {
+        const navContent = archive.get(navPath);
+        const entries = this.extractNavEntries(navContent);
+        for (let i2 = 0; i2 < entries.length; i2++) {
+          const entry = entries[i2];
+          const [filePart] = entry.href.split("#");
+          const contentPath = filePart ? posixJoin(rootDir, filePart) : navPath;
+          const chapterDocText = archive.get(contentPath);
+          if (!chapterDocText) continue;
+          let doc;
+          try {
+            doc = parseXml(chapterDocText);
+          } catch (_) {
+            continue;
+          }
+          const parsed = this.parseBookAndChapter(entry.text, i2);
+          const verses = this.extractVerses(doc);
+          chapters.push({
+            language,
+            book: parsed.book,
+            chapter: parsed.chapter,
+            title: parsed.title,
+            verses,
+            source: {
+              sourceFileChecksum: checksum,
+              importedAt
+            }
+          });
+        }
+      }
+      if (chapters.length === 0) {
+        return { success: false, error: "Unsupported EPUB structure: no chapters found." };
+      }
+      const metadata = {
+        language,
+        fileName: sourceFileName,
+        checksum,
+        importedAt,
+        chapterCount: chapters.length
+      };
+      await this.repository.saveCorpus(metadata, chapters);
+      return { success: true, metadata };
+    } catch (err2) {
+      return { success: false, error: err2 instanceof Error ? err2.message : String(err2) };
+    }
+  }
+};
+
 // main.ts
 var TraverturePlugin = class extends import_obsidian5.Plugin {
   constructor() {
@@ -1360,6 +2391,9 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.engine = null;
     this.processingElements = /* @__PURE__ */ new Set();
+    // offline importer & repo
+    this.offlineRepo = null;
+    this.epubImportService = null;
     this.parseGuard = false;
   }
   async loadSettings() {
@@ -1370,7 +2404,12 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
   }
   createEngine() {
     try {
-      this.engine = new TravertureEngine(this.settings.sourceLanguage, this.settings.outputLanguage, "full", false);
+      this.engine = new TravertureEngine(
+        this.settings.sourceLanguage,
+        this.settings.outputLanguage,
+        "full",
+        false
+      );
     } catch (e) {
       console.error("tra.VER:ture: Failed to create engine:", e);
     }
@@ -1400,7 +2439,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     const engineText = text.replace(/\{\{(.+?)\}\}/g, "\u27EA\u27EA$1\u27EB\u27EB");
     const parsed = this.safeParse(engineText);
     if (!parsed) return results;
-    const clauses = JSON.parse(parsed);
+    let clauses = JSON.parse(parsed);
+    clauses = augmentClauses(engineText, clauses);
     if (clauses.length === 0) return results;
     let lastBookNum = -1;
     let groupStart = 0;
@@ -1413,8 +2453,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       if (bookNum !== lastBookNum) {
         if (lastBookNum !== -1 && groupCount > 0) {
           const original = engineText.substring(groupStart, groupEnd);
-          for (let i = clauseData.length - 1; i >= 0 && i >= clauseData.length - groupCount; i--) {
-            clauseData[i].original = original;
+          for (let i2 = clauseData.length - 1; i2 >= 0 && i2 >= clauseData.length - groupCount; i2--) {
+            clauseData[i2].original = original;
           }
         }
         groupStart = startPos;
@@ -1427,8 +2467,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     }
     if (lastBookNum !== -1 && groupCount > 0) {
       const original = engineText.substring(groupStart, groupEnd);
-      for (let i = clauseData.length - 1; i >= 0 && i >= clauseData.length - groupCount; i--) {
-        clauseData[i].original = original;
+      for (let i2 = clauseData.length - 1; i2 >= 0 && i2 >= clauseData.length - groupCount; i2--) {
+        clauseData[i2].original = original;
       }
     }
     const engFull = new TravertureEngine("en", "en", "full", false);
@@ -1441,7 +2481,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         const fullDecoded = JSON.parse(engFull.decode_scriptures(rangeJson));
         const stdDecoded = JSON.parse(engStd.decode_scriptures(rangeJson));
         const offDecoded = JSON.parse(engOff.decode_scriptures(rangeJson));
-        const startBcv = range[0], endBcv = range[1];
+        const startBcv = range[0];
+        const endBcv = range[1];
         results.push({
           scripture: original,
           fullRef: fullDecoded[0] || original,
@@ -1471,14 +2512,15 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         const engineInput = "\u27EA\u27EA" + refText + "\u27EB\u27EB";
         const parsed2 = this.safeParse(engineInput);
         if (!parsed2) return inner;
-        const clauses = JSON.parse(parsed2);
+        let clauses = JSON.parse(parsed2);
+        clauses = augmentClauses(engineInput, clauses);
         if (clauses.length === 0) return inner;
         let result = inner;
         let bookName = "";
         const sorted = [...clauses].sort((a, b) => b[0].length - a[0].length);
-        for (let i = 0; i < sorted.length; i++) {
-          const [clauseText, , , ranges] = sorted[i];
-          const origIndex = clauses.indexOf(sorted[i]);
+        for (let i2 = 0; i2 < sorted.length; i2++) {
+          const [clauseText, , , ranges] = sorted[i2];
+          const origIndex = clauses.indexOf(sorted[i2]);
           if (origIndex === 0) {
             const match = clauseText.match(/^(.+?)\s+\d/);
             if (match) bookName = match[1];
@@ -1533,12 +2575,10 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         const linked = this.insertLinks(text, clauses);
         if (linked !== text) {
           const fragment = activeDocument.createDocumentFragment();
-          const span = activeDocument.createElement("span");
           const parsedLinked = new DOMParser().parseFromString(linked, "text/html");
           for (const child of Array.from(parsedLinked.body.childNodes)) {
             fragment.appendChild(child.cloneNode(true));
           }
-          while (span.firstChild) fragment.appendChild(span.firstChild);
           textNode.parentNode?.replaceChild(fragment, textNode);
         }
       }
@@ -1556,27 +2596,70 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           e.preventDefault();
           e.stopPropagation();
           const bcv = link.getAttribute("data-bcv");
-          const fmtEngine = new TravertureEngine(this.settings.sourceLanguage, this.settings.outputLanguage, this.settings.titleFormat, false);
+          const scheme = this.settings.linkScheme ?? "popup";
+          if (scheme === "jwlibrary" || scheme === "jworg") {
+            const languages = getAvailableLanguages();
+            const langObj = languages.find((l) => l.code === this.settings.outputLanguage);
+            const langSymbol = langObj ? TravertureEngine.get_lang_symbol(this.settings.outputLanguage) : "E";
+            const timecodes2 = this.settings.outputLanguage === "ase" ? await getAslTimecodes(bcv) : void 0;
+            const url = scheme === "jwlibrary" ? timecodes2 ? `jwlibrary:///finder?wtlocale=${langSymbol}&bible=${bcv}&ts=${timecodes2}` : `jwlibrary:///finder?wtlocale=${langSymbol}&bible=${bcv}` : timecodes2 ? `https://www.jw.org/finder?wtlocale=${langSymbol}&bible=${bcv}&ts=${timecodes2}` : `https://www.jw.org/finder?wtlocale=${langSymbol}&bible=${bcv}`;
+            try {
+              const maybeRequire = window.require;
+              if (maybeRequire) {
+                const { shell } = maybeRequire("electron");
+                await shell.openExternal(url);
+              } else {
+                window.open(url, "_blank", "noopener");
+              }
+            } catch {
+              window.open(url, "_blank", "noopener");
+            }
+            return;
+          }
+          const fmtEngine = new TravertureEngine(
+            this.settings.sourceLanguage,
+            this.settings.outputLanguage,
+            this.settings.titleFormat,
+            false
+          );
           const decoded = JSON.parse(fmtEngine.decode_scriptures(JSON.stringify([[bcv, bcv]])));
           const refText = decoded[0] || link.textContent || "";
           const timecodes = this.settings.outputLanguage === "ase" ? await getAslTimecodes(bcv) : void 0;
           const modal = new VerseModal();
-          modal.show({ html: `<p><em>Loading...</em></p>`, citation: refText }, bcv, this.settings.outputLanguage, refText, timecodes);
-          const verseData = await fetchVerseWithExtras(bcv, this.settings.outputLanguage, modal.getSignal());
+          modal.show(
+            { html: `<p><em>Loading...</em></p>`, citation: refText },
+            bcv,
+            this.settings.outputLanguage,
+            refText,
+            timecodes
+          );
+          const verseData = await fetchVerseWithExtrasOfflineFirst(
+            bcv,
+            this.settings.outputLanguage,
+            this.offlineRepo,
+            modal.getSignal()
+          );
           if (!modal.isVisible()) return;
-          modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: refText }, bcv, this.settings.outputLanguage, refText, timecodes);
+          modal.show(
+            verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: refText },
+            bcv,
+            this.settings.outputLanguage,
+            refText,
+            timecodes
+          );
         })();
       });
     });
     this.processingElements.delete(el);
   }
   insertLinks(text, clauses) {
+    clauses = augmentClauses(text, clauses);
     if (clauses.length === 0) return text;
     const positions = [];
     let bookName = "";
-    for (let i = 0; i < clauses.length; i++) {
-      const [clauseText, startPos, endPos, ranges] = clauses[i];
-      if (i === 0 || !/^\d/.test(clauseText)) {
+    for (let i2 = 0; i2 < clauses.length; i2++) {
+      const [clauseText, startPos, endPos, ranges] = clauses[i2];
+      if (i2 === 0 || !/^\d/.test(clauseText)) {
         const match = clauseText.match(/^(.+?)\s+\d/);
         if (match) bookName = match[1];
       }
@@ -1610,6 +2693,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     } catch (e) {
       console.error("tra.VER:ture: WASM error:", e);
     }
+    this.offlineRepo = new VaultOfflineEpubRepository(this.app, this.manifest.id);
+    this.epubImportService = new EpubImportService(this.offlineRepo);
     this.addSettingTab(new TravertureSettingTab(this.app, this));
     this.registerView(VIEW_TYPE_TRAVERTURE_SIDEBAR, (leaf) => new TravertureSidebarView(leaf, this));
     this.registerEditorExtension(createTravertureEditorPlugin(this));
@@ -1622,37 +2707,61 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         item.setTitle("tra.VER:ture").setIcon("book-open");
         const submenu = item.setSubmenu();
         if (selection) {
-          submenu.addItem((subItem) => subItem.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
-            await this.showSidebarWithResults(await this.parseReferences(selection));
-          }));
+          submenu.addItem((subItem) => {
+            subItem.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
+              await this.showSidebarWithResults(
+                await this.parseReferences(selection)
+              );
+            });
+          });
           submenu.addItem((subItem) => {
             subItem.setTitle("Insert citation").setIcon("quote-glyph");
             const citeMenu = subItem.setSubmenu();
-            citeMenu.addItem((citeItem) => citeItem.setTitle('Reference: "verse"').onClick(async () => {
-              await this.insertCitation(editor, selection, false);
-            }));
-            citeMenu.addItem((citeItem) => citeItem.setTitle('"verse" (Reference)').onClick(async () => {
-              await this.insertCitation(editor, selection, true);
-            }));
+            citeMenu.addItem((citeItem) => {
+              citeItem.setTitle('Reference: "verse"').onClick(async () => {
+                await this.insertCitation(editor, selection, false);
+              });
+            });
+            citeMenu.addItem((citeItem) => {
+              citeItem.setTitle('"verse" (Reference)').onClick(async () => {
+                await this.insertCitation(editor, selection, true);
+              });
+            });
           });
           submenu.addItem((subItem) => {
             subItem.setTitle("Reformat selection").setIcon("pencil");
             const reformatMenu = subItem.setSubmenu();
-            reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, selection, "full")));
-            reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, selection, "standard")));
-            reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, selection, "official")));
+            reformatMenu.addItem((fmtItem) => {
+              fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, selection, "full"));
+            });
+            reformatMenu.addItem((fmtItem) => {
+              fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, selection, "standard"));
+            });
+            reformatMenu.addItem((fmtItem) => {
+              fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, selection, "official"));
+            });
           });
           submenu.addSeparator();
         }
-        submenu.addItem((subItem) => subItem.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
-          await this.showSidebarWithResults(await this.parseReferences(editor.getValue()));
-        }));
+        submenu.addItem((subItem) => {
+          subItem.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
+            await this.showSidebarWithResults(
+              await this.parseReferences(editor.getValue())
+            );
+          });
+        });
         submenu.addItem((subItem) => {
           subItem.setTitle("Reformat document").setIcon("pencil");
           const reformatMenu = subItem.setSubmenu();
-          reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, editor.getValue(), "full", true)));
-          reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, editor.getValue(), "standard", true)));
-          reformatMenu.addItem((fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, editor.getValue(), "official", true)));
+          reformatMenu.addItem((fmtItem) => {
+            fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, editor.getValue(), "full", true));
+          });
+          reformatMenu.addItem((fmtItem) => {
+            fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, editor.getValue(), "standard", true));
+          });
+          reformatMenu.addItem((fmtItem) => {
+            fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, editor.getValue(), "official", true));
+          });
         });
         submenu.addSeparator();
         submenu.addItem((subItem) => {
@@ -1660,12 +2769,14 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           const langMenu = subItem.setSubmenu();
           const languages = getAvailableLanguages().filter((l) => l.code !== "ase");
           for (const lang of languages) {
-            langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
-              this.settings.sourceLanguage = lang.code;
-              await this.saveSettings();
-              this.createEngine();
-              new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
-            }));
+            langMenu.addItem((langItem) => {
+              langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
+                this.settings.sourceLanguage = lang.code;
+                await this.saveSettings();
+                this.createEngine();
+                new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
+              });
+            });
           }
         });
         submenu.addItem((subItem) => {
@@ -1673,12 +2784,14 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           const langMenu = subItem.setSubmenu();
           const languages = getAvailableLanguages();
           for (const lang of languages) {
-            langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
-              this.settings.outputLanguage = lang.code;
-              await this.saveSettings();
-              this.createEngine();
-              new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
-            }));
+            langMenu.addItem((langItem) => {
+              langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
+                this.settings.outputLanguage = lang.code;
+                await this.saveSettings();
+                this.createEngine();
+                new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
+              });
+            });
           }
         });
       });
@@ -1694,28 +2807,34 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         item.setTitle("tra.VER:ture").setIcon("book-open");
         const submenu = item.setSubmenu();
         if (selection) {
-          submenu.addItem((subItem) => subItem.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
-            await this.showSidebarWithResults(await this.parseReferences(selection));
-          }));
+          submenu.addItem(
+            (subItem) => subItem.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
+              await this.showSidebarWithResults(await this.parseReferences(selection));
+            })
+          );
         }
-        submenu.addItem((subItem) => subItem.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
-          const file = view.file;
-          if (!file) return;
-          const content = this.stripFrontmatter(await this.app.vault.read(file));
-          await this.showSidebarWithResults(await this.parseReferences(content));
-        }));
+        submenu.addItem(
+          (subItem) => subItem.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
+            const file = view.file;
+            if (!file) return;
+            const content = this.stripFrontmatter(await this.app.vault.read(file));
+            await this.showSidebarWithResults(await this.parseReferences(content));
+          })
+        );
         submenu.addSeparator();
         submenu.addItem((subItem) => {
           subItem.setTitle("Source language").setIcon("book-open");
           const langMenu = subItem.setSubmenu();
           const languages = getAvailableLanguages().filter((l) => l.code !== "ase");
           for (const lang of languages) {
-            langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
-              this.settings.sourceLanguage = lang.code;
-              await this.saveSettings();
-              this.createEngine();
-              new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
-            }));
+            langMenu.addItem(
+              (langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
+                this.settings.sourceLanguage = lang.code;
+                await this.saveSettings();
+                this.createEngine();
+                new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
+              })
+            );
           }
         });
         submenu.addItem((subItem) => {
@@ -1723,12 +2842,14 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           const langMenu = subItem.setSubmenu();
           const languages = getAvailableLanguages();
           for (const lang of languages) {
-            langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
-              this.settings.outputLanguage = lang.code;
-              await this.saveSettings();
-              this.createEngine();
-              new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
-            }));
+            langMenu.addItem(
+              (langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
+                this.settings.outputLanguage = lang.code;
+                await this.saveSettings();
+                this.createEngine();
+                new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
+              })
+            );
           }
         });
       });
@@ -1737,45 +2858,85 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.addRibbonIcon("scroll", "tra.VER:ture", () => {
       this.showTravertureMenu().showAtMouseEvent({ clientX: 100, clientY: 100 });
     });
-    this.addCommand({ id: "open-menu", name: "tra.VER:ture: Open menu", icon: "scroll", editorCallback: () => {
-      this.showTravertureMenu().showAtMouseEvent({ clientX: 100, clientY: 100 });
-    } });
-    this.addCommand({ id: "parse-document-references", name: "tra.VER:ture: Parse document", icon: "file-text", callback: async () => {
-      const file = this.app.workspace.getActiveFile();
-      if (!file) return;
-      const content = this.stripFrontmatter(await this.app.vault.read(file));
-      await this.showSidebarWithResults(await this.parseReferences(content));
-    } });
-    this.addCommand({ id: "parse-selection-references", name: "tra.VER:ture: Parse selection", icon: "sidebar-right", editorCallback: async (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      await this.showSidebarWithResults(await this.parseReferences(selection));
-    } });
-    this.addCommand({ id: "insert-citation-ref", name: "tra.VER:ture: Insert citation (Reference)", icon: "quote-glyph", editorCallback: async (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      await this.insertCitation(editor, selection, false);
-    } });
-    this.addCommand({ id: "insert-citation-verse", name: "tra.VER:ture: Insert citation (verse)", icon: "quote-glyph", editorCallback: async (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      await this.insertCitation(editor, selection, true);
-    } });
-    this.addCommand({ id: "reformat-full", name: "tra.VER:ture: Reformat (Full)", icon: "pencil", editorCallback: (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      this.reformatReferences(editor, selection, "full");
-    } });
-    this.addCommand({ id: "reformat-standard", name: "tra.VER:ture: Reformat (Standard)", icon: "pencil", editorCallback: (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      this.reformatReferences(editor, selection, "standard");
-    } });
-    this.addCommand({ id: "reformat-official", name: "tra.VER:ture: Reformat (Official)", icon: "pencil", editorCallback: (editor) => {
-      const selection = editor.getSelection();
-      if (!selection) return;
-      this.reformatReferences(editor, selection, "official");
-    } });
+    this.addCommand({
+      id: "open-menu",
+      name: "tra.VER:ture: Open menu",
+      icon: "scroll",
+      editorCallback: () => {
+        this.showTravertureMenu().showAtMouseEvent({ clientX: 100, clientY: 100 });
+      }
+    });
+    this.addCommand({
+      id: "parse-document-references",
+      name: "tra.VER:ture: Parse document",
+      icon: "file-text",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return;
+        const content = this.stripFrontmatter(await this.app.vault.read(file));
+        await this.showSidebarWithResults(await this.parseReferences(content));
+      }
+    });
+    this.addCommand({
+      id: "parse-selection-references",
+      name: "tra.VER:ture: Parse selection",
+      icon: "sidebar-right",
+      editorCallback: async (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        await this.showSidebarWithResults(await this.parseReferences(selection));
+      }
+    });
+    this.addCommand({
+      id: "insert-citation-ref",
+      name: "tra.VER:ture: Insert citation (Reference)",
+      icon: "quote-glyph",
+      editorCallback: async (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        await this.insertCitation(editor, selection, false);
+      }
+    });
+    this.addCommand({
+      id: "insert-citation-verse",
+      name: "tra.VER:ture: Insert citation (verse)",
+      icon: "quote-glyph",
+      editorCallback: async (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        await this.insertCitation(editor, selection, true);
+      }
+    });
+    this.addCommand({
+      id: "reformat-full",
+      name: "tra.VER:ture: Reformat (Full)",
+      icon: "pencil",
+      editorCallback: (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        this.reformatReferences(editor, selection, "full");
+      }
+    });
+    this.addCommand({
+      id: "reformat-standard",
+      name: "tra.VER:ture: Reformat (Standard)",
+      icon: "pencil",
+      editorCallback: (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        this.reformatReferences(editor, selection, "standard");
+      }
+    });
+    this.addCommand({
+      id: "reformat-official",
+      name: "tra.VER:ture: Reformat (Official)",
+      icon: "pencil",
+      editorCallback: (editor) => {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        this.reformatReferences(editor, selection, "official");
+      }
+    });
   }
   async showSidebarWithResults(refs) {
     const { workspace } = this.app;
@@ -1794,14 +2955,26 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     void leaf.view.displayResults(refs);
   }
   reformatReferences(editor, text, format, wholeDoc = false) {
-    const parsed = this.engine?.parse(this.settings.sourceLanguage, this.settings.outputLanguage, "full", false, text);
+    const parsed = this.engine?.parse(
+      this.settings.sourceLanguage,
+      this.settings.outputLanguage,
+      "full",
+      false,
+      text
+    );
     if (!parsed) return;
-    const clauses = JSON.parse(parsed);
+    let clauses = JSON.parse(parsed);
+    clauses = augmentClauses(text, clauses);
     if (clauses.length === 0) return;
-    const fmtEngine = new TravertureEngine(this.settings.sourceLanguage, this.settings.sourceLanguage, format, false);
+    const fmtEngine = new TravertureEngine(
+      this.settings.sourceLanguage,
+      this.settings.sourceLanguage,
+      format,
+      false
+    );
     let processed = text;
-    for (let i = clauses.length - 1; i >= 0; i--) {
-      const [, startPos, endPos, ranges] = clauses[i];
+    for (let i2 = clauses.length - 1; i2 >= 0; i2--) {
+      const [, startPos, endPos, ranges] = clauses[i2];
       if (ranges.length === 0) continue;
       const decoded = JSON.parse(fmtEngine.decode_scriptures(JSON.stringify([ranges[0]])));
       const formattedRef = decoded[0] || "";
@@ -1817,12 +2990,19 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     }
   }
   async insertCitation(editor, text, withRef) {
-    const parsed = this.engine?.parse(this.settings.sourceLanguage, this.settings.sourceLanguage, "full", false, text);
+    const parsed = this.engine?.parse(
+      this.settings.sourceLanguage,
+      this.settings.sourceLanguage,
+      "full",
+      false,
+      text
+    );
     if (!parsed) {
       new import_obsidian5.Notice("No scripture references found.");
       return;
     }
-    const clauses = JSON.parse(parsed);
+    let clauses = JSON.parse(parsed);
+    clauses = augmentClauses(text, clauses);
     if (clauses.length === 0) {
       new import_obsidian5.Notice("No scripture references found.");
       return;
@@ -1836,7 +3016,9 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       if (ranges.length === 0) continue;
       const bookNum = parseInt(ranges[0][0].substring(0, 2));
       if (bookNum !== lastBookNum) {
-        if (currentBcvs.length > 0) groups.push({ original: text.substring(groupStart, groupEnd), bcvs: currentBcvs });
+        if (currentBcvs.length > 0) {
+          groups.push({ original: text.substring(groupStart, groupEnd), bcvs: currentBcvs });
+        }
         groupStart = startPos;
         lastBookNum = bookNum;
         currentBcvs = [];
@@ -1846,7 +3028,9 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         currentBcvs.push(range[0] === range[1] ? range[0] : `${range[0]}-${range[1]}`);
       }
     }
-    if (currentBcvs.length > 0) groups.push({ original: text.substring(groupStart, groupEnd), bcvs: currentBcvs });
+    if (currentBcvs.length > 0) {
+      groups.push({ original: text.substring(groupStart, groupEnd), bcvs: currentBcvs });
+    }
     let result = text;
     const fetchedCache = /* @__PURE__ */ new Map();
     for (const group of groups) {
@@ -1855,7 +3039,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         const cacheKey = `${this.settings.outputLanguage}:${bcv}`;
         let verseText = fetchedCache.get(cacheKey);
         if (verseText === void 0) {
-          const verseData = await fetchVerseWithExtras(bcv, this.settings.outputLanguage);
+          const verseData = await fetchVerseWithExtrasOfflineFirst(bcv, this.settings.outputLanguage, this.offlineRepo);
           if (verseData) {
             let html = verseData.html.replace(/<span class="parabreak"><\/span>/g, " ").replace(/<span class="newblock"><\/span>/g, " ");
             const tempDiv = activeDocument.createElement("div");
@@ -1877,11 +3061,16 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
             fetchedCache.set(cacheKey, "");
           }
         }
-        if (verseText) allText += (allText ? " " : "") + verseText;
+        if (verseText) {
+          allText += (allText ? " " : "") + verseText;
+        }
       }
       if (allText) {
         const escaped = group.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        result = result.replace(new RegExp(escaped), withRef ? `"${allText}" (${group.original})` : `${group.original}: "${allText}"`);
+        result = result.replace(
+          new RegExp(escaped),
+          withRef ? `"${allText}" (${group.original})` : `${group.original}: "${allText}"`
+        );
       }
     }
     editor.replaceSelection(result);
@@ -1892,48 +3081,68 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     const sel = editor?.getSelection();
     const menu = new import_obsidian5.Menu();
     if (sel) {
-      menu.addItem((item) => item.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
-        await this.showSidebarWithResults(await this.parseReferences(sel));
-      }));
+      menu.addItem(
+        (item) => item.setTitle("Parse selection").setIcon("sidebar-right").onClick(async () => {
+          await this.showSidebarWithResults(await this.parseReferences(sel));
+        })
+      );
       menu.addItem((item) => {
         item.setTitle("Insert citation").setIcon("quote-glyph");
         const citeMenu = item.setSubmenu();
-        citeMenu.addItem((citeItem) => citeItem.setTitle('Reference: "verse"').onClick(async () => {
-          if (editor && sel) await this.insertCitation(editor, sel, false);
-        }));
-        citeMenu.addItem((citeItem) => citeItem.setTitle('"verse" (Reference)').onClick(async () => {
-          if (editor && sel) await this.insertCitation(editor, sel, true);
-        }));
+        citeMenu.addItem(
+          (citeItem) => citeItem.setTitle('Reference: "verse"').onClick(async () => {
+            if (editor && sel) await this.insertCitation(editor, sel, false);
+          })
+        );
+        citeMenu.addItem(
+          (citeItem) => citeItem.setTitle('"verse" (Reference)').onClick(async () => {
+            if (editor && sel) await this.insertCitation(editor, sel, true);
+          })
+        );
       });
       menu.addItem((item) => {
         item.setTitle("Reformat selection").setIcon("pencil");
         const submenu = item.setSubmenu();
-        submenu.addItem((fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, sel, "full")));
-        submenu.addItem((fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, sel, "standard")));
-        submenu.addItem((fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, sel, "official")));
+        submenu.addItem(
+          (fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => this.reformatReferences(editor, sel, "full"))
+        );
+        submenu.addItem(
+          (fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => this.reformatReferences(editor, sel, "standard"))
+        );
+        submenu.addItem(
+          (fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => this.reformatReferences(editor, sel, "official"))
+        );
       });
       menu.addSeparator();
     }
-    menu.addItem((item) => item.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
-      if (!file) {
-        new import_obsidian5.Notice("No file open.");
-        return;
-      }
-      const content = this.stripFrontmatter(await this.app.vault.read(file));
-      await this.showSidebarWithResults(await this.parseReferences(content));
-    }));
+    menu.addItem(
+      (item) => item.setTitle("Parse document").setIcon("sidebar-right").onClick(async () => {
+        if (!file) {
+          new import_obsidian5.Notice("No file open.");
+          return;
+        }
+        const content = this.stripFrontmatter(await this.app.vault.read(file));
+        await this.showSidebarWithResults(await this.parseReferences(content));
+      })
+    );
     menu.addItem((item) => {
       item.setTitle("Reformat document").setIcon("pencil");
       const submenu = item.setSubmenu();
-      submenu.addItem((fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => {
-        if (editor) this.reformatReferences(editor, editor.getValue(), "full", true);
-      }));
-      submenu.addItem((fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => {
-        if (editor) this.reformatReferences(editor, editor.getValue(), "standard", true);
-      }));
-      submenu.addItem((fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => {
-        if (editor) this.reformatReferences(editor, editor.getValue(), "official", true);
-      }));
+      submenu.addItem(
+        (fmtItem) => fmtItem.setTitle("Full (1 Corinthians)").onClick(() => {
+          if (editor) this.reformatReferences(editor, editor.getValue(), "full", true);
+        })
+      );
+      submenu.addItem(
+        (fmtItem) => fmtItem.setTitle("Standard (1 Cor.)").onClick(() => {
+          if (editor) this.reformatReferences(editor, editor.getValue(), "standard", true);
+        })
+      );
+      submenu.addItem(
+        (fmtItem) => fmtItem.setTitle("Official (1Co)").onClick(() => {
+          if (editor) this.reformatReferences(editor, editor.getValue(), "official", true);
+        })
+      );
     });
     menu.addSeparator();
     menu.addItem((item) => {
@@ -1941,12 +3150,14 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       const langMenu = item.setSubmenu();
       const languages = getAvailableLanguages().filter((l) => l.code !== "ase");
       for (const lang of languages) {
-        langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
-          this.settings.sourceLanguage = lang.code;
-          await this.saveSettings();
-          this.createEngine();
-          new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
-        }));
+        langMenu.addItem(
+          (langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.sourceLanguage).onClick(async () => {
+            this.settings.sourceLanguage = lang.code;
+            await this.saveSettings();
+            this.createEngine();
+            new import_obsidian5.Notice(`Source language: ${lang.vernacularName}`);
+          })
+        );
       }
     });
     menu.addItem((item) => {
@@ -1954,12 +3165,14 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       const langMenu = item.setSubmenu();
       const languages = getAvailableLanguages();
       for (const lang of languages) {
-        langMenu.addItem((langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
-          this.settings.outputLanguage = lang.code;
-          await this.saveSettings();
-          this.createEngine();
-          new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
-        }));
+        langMenu.addItem(
+          (langItem) => langItem.setTitle(`${lang.vernacularName} (${lang.code})`).setChecked(lang.code === this.settings.outputLanguage).onClick(async () => {
+            this.settings.outputLanguage = lang.code;
+            await this.saveSettings();
+            this.createEngine();
+            new import_obsidian5.Notice(`Output language: ${lang.vernacularName}`);
+          })
+        );
       }
     });
     return menu;
