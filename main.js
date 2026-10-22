@@ -2830,6 +2830,9 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     void this.appendInlineVerseText(el);
     if (this.settings.enableWolSearch !== false) {
       this.applyWolSearchLinks(el);
+      setTimeout(() => {
+        if (this.settings.enableWolSearch !== false) this.applyWolSearchLinks(el);
+      }, 50);
     }
     this.processingElements.delete(el);
   }

@@ -385,6 +385,10 @@ export default class TraverturePlugin extends Plugin {
 
         if (this.settings.enableWolSearch !== false) {
             this.applyWolSearchLinks(el);
+            // Mindmap views may finish rendering asynchronously; re-apply.
+            setTimeout(() => {
+                if (this.settings.enableWolSearch !== false) this.applyWolSearchLinks(el);
+            }, 50);
         }
 
         this.processingElements.delete(el);
