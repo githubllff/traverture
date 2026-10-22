@@ -11,27 +11,6 @@
 ### Removed
 
 ____
-## [3.6.0] - 2026-08-01
-### Fixed
-
-- Fixed settings panel in dark mode
-- Fixed selections with forced references
-- Fixed citation insertions for multiple references and forced references
-
-## [3.5.1] - 2026-07-31
-### Changed
-
-- Minor cosmetic changes
-
-## [3.5.0] - 2026-07-29
-### Added
-
-- `Ctrl/Cmd`+click opens references directly in *JW Library* (if installed)
-
-### Changed
-
-- Updated engine with better rejection of false-positives
-
 ## [3.4.0] - 2026-07-24
 ### Changed
 
@@ -124,9 +103,6 @@ ____
 - Initial Obidian Community release
 
 ____
-[3.6.0]:https://github.com/erykjj/traverture/releases/tag/3.6.0
-[3.5.1]:https://github.com/erykjj/traverture/releases/tag/3.5.1
-[3.5.0]:https://github.com/erykjj/traverture/releases/tag/3.5.0
 [3.4.0]:https://github.com/erykjj/traverture/releases/tag/3.4.0
 [3.3.2]:https://github.com/erykjj/traverture/releases/tag/3.3.2
 [3.3.1]:https://github.com/erykjj/traverture/releases/tag/3.3.1

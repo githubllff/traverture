@@ -20,7 +20,7 @@ This plugin writes to the system clipboard only when you click a COPY button (to
 
 ## WASM Module
 
-This plugin includes a WebAssembly (WASM) binary compiled from Rust. The WASM module is **embedded** in the plugin file and is not loaded from any external source. It contains the scripture reference parsing engine; it finds and converts Bible references into structured BCV codes. It also contains book name data for all supported languages. It is based on my [linkture](https://github.com/erykjj/linkture) project.
+This plugin includes a WebAssembly (WASM) binary compiled from Rust. The WASM module contains the scripture reference parsing engine; it finds and converts Bible references into structured BCV codes. It also contains book name data for all supported languages. It is based on my [linkture](https://github.com/erykjj/linkture) project.
 
 The WASM module:
 - Does not make any network requests

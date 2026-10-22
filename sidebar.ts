@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 // @ts-ignore
 import * as wasmModule from './engine.js';
-import { fetchVerseWithExtras, getAslTimecodes } from './cache';
+import { fetchVerseWithExtrasOfflineFirst, getAslTimecodes } from './cache';
 import { getAvailableLanguages } from './languages';
 import { VerseModal } from './modal';
 import { SidebarRef, VIEW_TYPE_TRAVERTURE_SIDEBAR } from './types';
@@ -84,7 +84,7 @@ export class TravertureSidebarView extends ItemView {
         if (!bookName) return ref.fullRef;
         const engBookName = wasmModule.TravertureEngine.get_book_name(ref.bookNum, 'en', 'full', false);
         if (engBookName && ref.fullRef.startsWith(engBookName)) {
-            const rest = ref.fullRef.substring(engBookName.length); // " 3" or " 1:3"
+            const rest = ref.fullRef.substring(engBookName.length);
             return `${bookName}${rest}`;
         }
         return `${bookName}`;
@@ -159,7 +159,7 @@ export class TravertureSidebarView extends ItemView {
             opt.value = lang.code;
             if (lang.code === this.outputLang) opt.selected = true;
         }
-        langSelect.addEventListener('change', () => { 
+        langSelect.addEventListener('change', () => {
             this.outputLang = langSelect.value;
             this.plugin.settings.outputLanguage = langSelect.value;
             void this.plugin.saveSettings();
@@ -207,14 +207,10 @@ export class TravertureSidebarView extends ItemView {
             const cb = label.createEl('input', { type: 'checkbox' });
             cb.checked = this.visibleColumns.has(col.key);
             cb.addEventListener('change', () => {
-                if (cb.checked) {
-                    this.visibleColumns.add(col.key);
-                } else {
+                if (cb.checked) this.visibleColumns.add(col.key);
+                else {
                     const remaining = [...this.visibleColumns].filter(k => k !== col.key);
-                    if (remaining.length === 0) {
-                        cb.checked = true;
-                        return;
-                    }
+                    if (remaining.length === 0) { cb.checked = true; return; }
                     this.visibleColumns.delete(col.key);
                 }
                 this.render();
@@ -228,7 +224,9 @@ export class TravertureSidebarView extends ItemView {
         const headerRow = thead.createEl('tr');
         for (const col of visibleCols) {
             const th = headerRow.createEl('th', { cls: 'traverture-sidebar-th' });
-            th.style.width = col.width; th.style.minWidth = col.width; th.style.textAlign = col.align;
+            th.style.width = col.width;
+            th.style.minWidth = col.width;
+            th.style.textAlign = col.align;
             let arrow = '';
             if (this.sortColumn === col.key) arrow = this.sortDir === 1 ? ' ▲' : (this.sortDir === -1 ? ' ▼' : '');
             th.textContent = col.key === 'scripture' ? `${col.label} (${this.plugin.settings.sourceLanguage})${arrow}` : col.label + arrow;
@@ -241,6 +239,7 @@ export class TravertureSidebarView extends ItemView {
                 this.render();
             });
         }
+
         const tbody = table.createEl('tbody');
         for (const ref of refs) {
             const row = tbody.createEl('tr');
@@ -260,24 +259,59 @@ export class TravertureSidebarView extends ItemView {
                     link.setAttribute('data-ref', displayVal);
                     link.addEventListener('click', (e) => { void (async () => {
                         if (e.button !== 0) return;
-                        if (e.ctrlKey || e.metaKey) {
-                            const langSymbol = wasmModule.TravertureEngine.get_lang_symbol(this.outputLang);
-                            window.open(`jwlibrary:///finder?wtlocale=${langSymbol}&bible=${bcv}`, '_blank');
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        const scheme = this.plugin.settings.linkScheme ?? 'popup';
+                        if (scheme === 'jwlibrary' || scheme === 'jworg') {
+                            const langObj = getAvailableLanguages().find(l => l.code === this.plugin.settings.outputLanguage);
+                            const langSymbol = langObj
+                                ? wasmModule.TravertureEngine.get_lang_symbol(this.plugin.settings.outputLanguage)
+                                : 'E';
+                            const timecodes = this.plugin.settings.outputLanguage === 'ase'
+                                ? await getAslTimecodes(bcv)
+                                : undefined;
+                            const query = timecodes
+                                ? `?wtlocale=${langSymbol}&bible=${bcv}&ts=${timecodes}`
+                                : `?wtlocale=${langSymbol}&bible=${bcv}`;
+                            const url = scheme === 'jwlibrary'
+                                ? `jwlibrary:///finder${query}`
+                                : `https://www.jw.org/finder${query}`;
+
+                            try {
+                                const maybeRequire = (window as any).require;
+                                if (maybeRequire) {
+                                    const { shell } = maybeRequire('electron');
+                                    await shell.openExternal(url);
+                                } else {
+                                    window.open(url, '_blank', 'noopener');
+                                }
+                            } catch (error) {
+                                console.error('Failed to open external scripture link:', error);
+                            }
+
                             return;
                         }
-                        e.preventDefault(); e.stopPropagation();
-                        const timecodes = this.outputLang === 'ase' 
-                            ? await getAslTimecodes(bcv) 
+
+                        const timecodes = this.outputLang === 'ase'
+                            ? await getAslTimecodes(bcv)
                             : undefined;
                         const modal = new VerseModal();
                         modal.show({ html: `<p><em>Loading...</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
-                        const verseData = await fetchVerseWithExtras(bcv, this.outputLang, modal.getSignal());
+                        const verseData = await fetchVerseWithExtrasOfflineFirst(bcv, this.outputLang, this.plugin.offlineRepo, modal.getSignal());
                         if (!modal.isVisible()) return;
                         modal.show(verseData || { html: `<p><em>Verse lookup unavailable</em></p>`, citation: displayVal }, bcv, this.outputLang, displayVal, timecodes);
                     })(); });
-                } else { td.setText(displayVal); }
+                } else {
+                    td.setText(displayVal);
+                }
             }
         }
-        if (wasFocused && this.searchInputEl) { this.searchInputEl.focus(); const len = this.searchInputEl.value.length; this.searchInputEl.setSelectionRange(len, len); }
+
+        if (wasFocused && this.searchInputEl) {
+            this.searchInputEl.focus();
+            const len = this.searchInputEl.value.length;
+            this.searchInputEl.setSelectionRange(len, len);
+        }
     }
 }

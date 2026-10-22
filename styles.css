@@ -530,23 +530,6 @@
   font-weight: 700;
 }
 
-.traverture-settings-footer {
-    margin-top: 20px;
-    padding-top: 12px;
-    border-top: 1px solid var(--background-modifier-border);
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-align: center;
-}
-
-.traverture-settings-footer a {
-    color: var(--text-accent);
-    text-decoration: none;
-}
-.traverture-settings-footer a:hover {
-    text-decoration: underline;
-}
-
 @container (max-width: 600px) {
   .traverture-sidebar-top-row { flex-wrap: wrap; }
   .traverture-sidebar-spacer { display: none; }
@@ -556,3 +539,4 @@
   .traverture-modal-content { flex-direction: column; }
   .traverture-modal-commentary { width: 100%; max-height: 40vh; border-left: none; border-top: 1px solid var(--background-modifier-border, #e5e7eb); }
 }
+.traverture-inline-verse { font-style: italic; opacity: 0.85; margin-left: 0.25em; }

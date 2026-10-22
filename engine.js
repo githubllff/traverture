@@ -90,14 +90,6 @@ export class TravertureEngine {
         }
     }
     /**
-     * @param {number} book_id
-     * @returns {number}
-     */
-    static get_chapter_count(book_id) {
-        const ret = wasm.travertureengine_get_chapter_count(book_id);
-        return ret;
-    }
-    /**
      * Returns the suffix for a given language code
      * @param {string} lang_code
      * @returns {string}
@@ -134,16 +126,6 @@ export class TravertureEngine {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
-    }
-    /**
-     * Get the number of verses in a specific chapter of a book
-     * @param {number} book_id
-     * @param {number} chapter
-     * @returns {number}
-     */
-    static get_verse_count(book_id, chapter) {
-        const ret = wasm.travertureengine_get_verse_count(book_id, chapter);
-        return ret;
     }
     /**
      * @returns {string}

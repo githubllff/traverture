@@ -1,6 +1,6 @@
 {
   "name": "traverture",
-  "version": "3.6.0",
+  "version": "3.4.0",
   "description": "Parse, convert, and preview scripture references; insert citations from NWT Bible, and launch in JW Library and JW.ORG.",
   "main": "main.js",
   "scripts": {
@@ -10,6 +10,9 @@
   "keywords": [],
   "author": "Eryk J.",
   "license": "MIT",
+  "dependencies": {
+    "fflate": "^0.8.0"
+  },
   "devDependencies": {
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",

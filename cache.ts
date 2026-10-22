@@ -3,6 +3,7 @@ import { requestUrl } from 'obsidian';
 import * as wasmModule from './engine.js';
 import { getLangSuffix } from './languages';
 import { VerseData } from './types';
+import { VaultOfflineEpubRepository } from './VaultOfflineEpubRepository';
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
@@ -211,4 +212,58 @@ export async function getAslTimecodes(bcv: string): Promise<string | undefined> 
     const endVerse = parseInt(endBcv.substring(5, 8));
     const result = await fetchAslTimecodes(bookNum, chapter, startVerse, endVerse);
     return result ?? undefined;
+}
+
+function parseBcvPart(bcv: string): { book: number; chapter: number; verse: number } {
+    return {
+        book: parseInt(bcv.substring(0, 2), 10),
+        chapter: parseInt(bcv.substring(2, 5), 10),
+        verse: parseInt(bcv.substring(5, 8), 10),
+    };
+}
+
+function buildOfflineCitation(range: string): string {
+    const [startRaw, endRaw] = range.includes('-') ? range.split('-') : [range, range];
+    const start = parseBcvPart(startRaw);
+    const end = parseBcvPart(endRaw);
+    if (start.book === end.book && start.chapter === end.chapter && start.verse === end.verse) {
+        return `${start.chapter}:${start.verse}`;
+    }
+    if (start.book === end.book && start.chapter === end.chapter) {
+        return `${start.chapter}:${start.verse}-${end.verse}`;
+    }
+    return `${start.chapter}:${start.verse}-${end.chapter}:${end.verse}`;
+}
+
+export async function fetchVerseWithExtrasOfflineFirst(
+    range: string,
+    langCode: string,
+    offlineRepo: VaultOfflineEpubRepository | null | undefined,
+    signal?: AbortSignal
+): Promise<VerseData | null> {
+    if (signal?.aborted) return null;
+
+    if (offlineRepo) {
+        try {
+            const [startRaw, endRaw] = range.includes('-') ? range.split('-') : [range, range];
+            const start = parseBcvPart(startRaw);
+            const end = parseBcvPart(endRaw);
+
+            if (start.book === end.book && start.chapter === end.chapter) {
+                const text = await offlineRepo.getVerseRange(langCode, start.book, start.chapter, start.verse, end.verse);
+                if (text) {
+                    return {
+                        html: `<p>${text}</p>`,
+                        citation: buildOfflineCitation(range),
+                        footnotes: [],
+                        crossReferences: [],
+                        commentaries: [],
+                    };
+                }
+            }
+        } catch (_) {
+        }
+    }
+
+    return fetchVerseWithExtras(range, langCode, signal);
 }

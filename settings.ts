@@ -1,119 +1,289 @@
-import { PluginSettingTab, Setting } from 'obsidian';
-// @ts-ignore
-import * as wasmModule from './engine.js';
-import { getAvailableLanguages } from './languages';
-import TraverturePlugin from './main';
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import type TraverturePlugin from "./main";
+import { getAvailableLanguages } from "./languages";
 
 export class TravertureSettingTab extends PluginSettingTab {
-    plugin: TraverturePlugin;
+  plugin: TraverturePlugin;
 
-    constructor(app: any, plugin: TraverturePlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
+  constructor(app: App, plugin: TraverturePlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  async chooseAndImportEpub(overwriteExisting = false): Promise<void> {
+    let file: File | null = null;
+
+    // Prefer the File System Access API when available (more reliable in Electron/Obsidian).
+    const picker = (window as any).showOpenFilePicker;
+    if (typeof picker === "function") {
+      try {
+        const [handle] = await picker({
+          types: [
+            {
+              description: "EPUB files",
+              accept: { "application/epub+zip": [".epub"] },
+            },
+          ],
+          multiple: false,
+        });
+        file = await handle.getFile();
+      } catch (e: any) {
+        // User cancelled or API unavailable; fall through to input fallback.
+        if (e && e.name !== "AbortError") {
+          // fall through
+        } else {
+          return;
+        }
+      }
     }
 
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
+    if (!file) {
+      const input = this.containerEl.createEl("input");
+      input.type = "file";
+      input.accept = ".epub,application/epub+zip";
+      input.hidden = true;
 
-        const headerEl = containerEl.createDiv({ cls: 'traverture-settings-header' });
-        headerEl.createSpan({ text: 'tra.VER:ture', cls: 'traverture-settings-title' });
-        const engineVersion = wasmModule.TravertureEngine.get_version();
-        headerEl.createSpan({ 
-            text: `v${this.plugin.manifest.version} – ${engineVersion}`,
-            cls: 'traverture-version-info'
+      file = await new Promise<File | null>((resolve) => {
+        const finish = (f: File | null) => {
+          input.remove();
+          resolve(f);
+        };
+
+        input.addEventListener("change", () => {
+          finish(input.files?.[0] ?? null);
         });
 
-        const languages = getAvailableLanguages();
-
-        new Setting(containerEl)
-            .setName('Source language')
-            .setDesc('Language of the scripture references in your notes')
-            .addDropdown(dropdown => {
-                for (const lang of languages.filter(l => l.code !== 'ase')) {
-                    dropdown.addOption(lang.code, `${lang.vernacularName} (${lang.code})`);
-                }
-                dropdown.setValue(this.plugin.settings.sourceLanguage)
-                    .onChange(async (value) => {
-                        this.plugin.settings.sourceLanguage = value;
-                        await this.plugin.saveSettings();
-                        this.plugin.createEngine();
-                    });
-            });
-
-        new Setting(containerEl)
-            .setName('Output language')
-            .setDesc('Language for displaying and fetching scripture text')
-            .addDropdown(dropdown => {
-                for (const lang of languages) {
-                    dropdown.addOption(lang.code, `${lang.vernacularName} (${lang.code})`);
-                }
-                dropdown.setValue(this.plugin.settings.outputLanguage)
-                    .onChange(async (value) => {
-                        this.plugin.settings.outputLanguage = value;
-                        await this.plugin.saveSettings();
-                        this.plugin.createEngine();
-                    });
-            });
-
-        new Setting(containerEl)
-            .setName('Modal title format')
-            .setDesc('How scripture references are displayed in the modal title')
-            .addDropdown(dropdown => {
-                dropdown.addOption('full', 'Full (1 Corinthians)');
-                dropdown.addOption('standard', 'Standard (1 Cor.)');
-                dropdown.addOption('official', 'Official (1Co)');
-                dropdown
-                    .setValue(this.plugin.settings.titleFormat)
-                    .onChange(async (value) => {
-                        this.plugin.settings.titleFormat = value;
-                        await this.plugin.saveSettings();
-                    });
-            });
-
-        new Setting(containerEl)
-            .setName('Auto-detect references')
-            .setDesc('Automatically detect scripture references in View mode without {{ }} markers.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.autoDetect)
-                .onChange(async (value) => {
-                    this.plugin.settings.autoDetect = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        // New setting: JW link behavior
-        new Setting(containerEl)
-            .setName('JW link behavior')
-            .setDesc('When clicking a scripture link: show popup, open JW Library app, or open web finder')
-            .addDropdown((dropdown) => {
-                dropdown.addOption('popup', 'Popup (show verse modal)');
-                dropdown.addOption('jwlibrary', 'Open via JW Library app (jwlibrary://)');
-                dropdown.addOption('jworg', 'Open via https://www.jw.org/finder (web)');
-                dropdown
-                    .setValue(this.plugin.settings.linkScheme ?? 'popup')
-                    .onChange(async (value) => {
-                        this.plugin.settings.linkScheme = value;
-                        await this.plugin.saveSettings();
-                    });
-            });
-
-        const footerEl = containerEl.createDiv({ cls: 'traverture-settings-footer' });
-        const footerText = footerEl.createSpan();
-        footerText.appendChild(document.createTextNode('My other Obsidian plugin: '));
-        footerText.createEl('strong', { text: 'con[VER]sum' });
-        footerText.appendChild(document.createTextNode(': '));
-        const githubLink = footerText.createEl('a', {
-            text: 'GitHub repo',
-            href: 'https://github.com/erykjj/conversum'
+        input.addEventListener("cancel", () => {
+          finish(null);
         });
-        githubLink.setAttribute('target', '_blank');
-        githubLink.setAttribute('rel', 'noopener noreferrer');
-        footerText.appendChild(document.createTextNode(', '));
-        const obsidianLink = footerText.createEl('a', {
-            text: 'Obsidian Community',
-            href: 'https://community.obsidian.md/plugins/conversum'
-        });
-        obsidianLink.setAttribute('target', '_blank');
-        obsidianLink.setAttribute('rel', 'noopener noreferrer');
+
+        input.click();
+      });
     }
+
+    if (!file) return;
+
+    if (!this.plugin.epubImportService) {
+      new Notice("EPUB importer not initialized.");
+      return;
+    }
+
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const result = await this.plugin.epubImportService.importEpub(
+        data,
+        file.name,
+        overwriteExisting,
+      );
+
+      if (!result.success) {
+        new Notice(`EPUB import failed: ${result.error ?? "unknown"}`);
+      } else {
+        new Notice(`Imported offline corpus: ${result.metadata?.language}`);
+      }
+    } catch (e) {
+      new Notice(`EPUB import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    this.display();
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    const headerEl = containerEl.createDiv({ cls: "traverture-settings-header" });
+    headerEl.createSpan({ text: "tra.VER:ture", cls: "traverture-settings-title" });
+    headerEl.createSpan({
+      text: `v${this.plugin.manifest.version}`,
+      cls: "traverture-version-info",
+    });
+
+    const languages = getAvailableLanguages();
+
+    new Setting(containerEl)
+      .setName("Source language")
+      .setDesc("Language of the scripture references in your notes")
+      .addDropdown((dropdown) => {
+        for (const language of languages.filter((item) => item.code !== "ase")) {
+          dropdown.addOption(
+            language.code,
+            `${language.vernacularName} (${language.code})`,
+          );
+        }
+        dropdown
+          .setValue(this.plugin.settings.sourceLanguage)
+          .onChange(async (value) => {
+            this.plugin.settings.sourceLanguage = value;
+            await this.plugin.saveSettings();
+            this.plugin.createEngine();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Output language")
+      .setDesc("Language for displaying and fetching scripture text")
+      .addDropdown((dropdown) => {
+        for (const language of languages) {
+          dropdown.addOption(
+            language.code,
+            `${language.vernacularName} (${language.code})`,
+          );
+        }
+        dropdown
+          .setValue(this.plugin.settings.outputLanguage)
+          .onChange(async (value) => {
+            this.plugin.settings.outputLanguage = value;
+            await this.plugin.saveSettings();
+            this.plugin.createEngine();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Modal title format")
+      .setDesc("How scripture references are displayed in the modal title")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("full", "Full (1 Corinthians)");
+        dropdown.addOption("standard", "Standard (1 Cor.)");
+        dropdown.addOption("official", "Official (1Co)");
+        dropdown
+          .setValue(this.plugin.settings.titleFormat)
+          .onChange(async (value) => {
+            this.plugin.settings.titleFormat = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Auto-detect references")
+      .setDesc("Automatically detect scripture references in View mode without {{ }} markers.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.autoDetect)
+          .onChange(async (value) => {
+            this.plugin.settings.autoDetect = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Show verse text after link")
+      .setDesc("Append the verse text immediately after each scripture link (uses offline EPUB when available).")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.showVerseText ?? false)
+          .onChange(async (value) => {
+            this.plugin.settings.showVerseText = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Enable WOL search links")
+      .setDesc("Turn typed 'wol:...' triggers into clickable search links (similar to inrefens).")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.enableWolSearch ?? true)
+          .onChange(async (value) => {
+            this.plugin.settings.enableWolSearch = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("WOL search target")
+      .setDesc("Where 'wol:' triggers search: wol.jw.org or jw.org.")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("wol", "wol.jw.org (Watchtower Online Library)");
+        dropdown.addOption("jw", "jw.org");
+        dropdown
+          .setValue(this.plugin.settings.wolSearchSite ?? "wol")
+          .onChange(async (value) => {
+            this.plugin.settings.wolSearchSite = value === "jw" ? "jw" : "wol";
+            await this.plugin.saveSettings();
+          });
+      });
+
+
+
+    new Setting(containerEl)
+      .setName("JW link scheme")
+      .setDesc("Choose how scripture links are opened: popup (modal preview), JW Library app, or JW.org.")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("popup", "Popup preview (modal)");
+        dropdown.addOption(
+          "jwlibrary",
+          "Open via jwlibrary:// (native JW Library app)",
+        );
+        dropdown.addOption("jworg", "Open via jworg:// (JW.org handler)");
+
+        const scheme = this.plugin.settings.linkScheme === "jworg"
+          ? "jworg"
+          : this.plugin.settings.linkScheme === "popup"
+            ? "popup"
+            : "jwlibrary";
+
+        dropdown
+          .setValue(scheme)
+          .onChange(async (value) => {
+            this.plugin.settings.linkScheme =
+              value === "jworg" ? "jworg" : value === "popup" ? "popup" : "jwlibrary";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Import EPUB for offline lookup")
+      .setDesc("Upload an EPUB file to enable offline citation lookup stored in the vault.")
+      .addButton((button) =>
+        button.setButtonText("Import EPUB").onClick(async () => {
+          await this.chooseAndImportEpub(false);
+          this.display();
+        }),
+      );
+
+    const activeLanguage = this.plugin.settings.outputLanguage;
+    void this.renderOfflineCorpusSetting(containerEl, activeLanguage);
+  }
+
+  private async renderOfflineCorpusSetting(
+    containerEl: HTMLElement,
+    activeLanguage: string,
+  ): Promise<void> {
+    const metadata = await this.plugin.offlineRepo?.getMetadata(activeLanguage);
+
+    new Setting(containerEl)
+      .setName("Offline EPUB corpus")
+      .setDesc(
+        metadata
+          ? `Current offline corpus for ${activeLanguage}: ${metadata.fileName} (${metadata.chapterCount ?? 0} chapters)`
+          : `No offline corpus imported for ${activeLanguage}.`,
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Replace EPUB")
+          .setDisabled(!metadata)
+          .onClick(async () => {
+            await this.chooseAndImportEpub(true);
+            this.display();
+          }),
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Delete EPUB")
+          .setWarning()
+          .setDisabled(!metadata)
+          .onClick(async () => {
+            if (!this.plugin.offlineRepo) {
+              new Notice("Offline EPUB repository not initialized.");
+              return;
+            }
+            await this.plugin.offlineRepo.removeLanguage(activeLanguage);
+            new Notice(`Deleted offline corpus for ${activeLanguage}.`);
+            this.display();
+          }),
+      );
+  }
 }
+
+export default TravertureSettingTab;

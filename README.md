@@ -4,7 +4,7 @@
 
 > **traverture** (n.): The act of traversing text to find, convert, and reformat scripture references – a turning across formats, translations, and styles. From Latin *trans-* ("across") + *vertere* ("to turn") + *-ura* (action/result).
 
-A scripture reference parser, formatter, and viewer for Obsidian. Automatically creates interactive links with verse previews; allows parsing selection or entire documents into a searchable, sortable sidebar table. *Invenire et convertere* ("To find and convert").
+A scripture reference parser, formatter, and viewer for Obsidian. Automatically creates interactive links with verse previews; allows parsing selection or entire documents into a searchable, sortable sidebar table.
 
 ## Security and Privacy
 
@@ -16,7 +16,7 @@ If you are concerned about the "Scorecard" review or the "Caution" warning on th
 
 - **Automatic reference detection** – Scripture references are automatically detected in both View and Edit modes. Works with most book name variants and common abbreviations (e.g., "2 Sam.", "II Samuel", "2Sa"). References can also be force-detected by wrapping them in `{{ }}` (e.g., `{{Song of Solomon 1:1}}`). See [Known Limitations](#known-limitations) for edge cases.
 
-- **Verse preview modal** – Click any reference to open a modal with the full scripture text[^1] (with cross-reference and footnote tooltips), a study-note pane (where available) and buttons to copy the text, or open in *JW Library*[^2] or [*JW.ORG*](https://jw.org)[^3]. `Ctrl/Cmd`+click opens references directly in *JW Library* (if installed).
+- **Verse preview modal** – Click any reference to open a modal with the full scripture text[^1] (with cross-reference and footnote tooltips), a study-note pane (where available) and buttons to copy the text, or open in *JW Library*[^2] or [*JW.ORG*](https://jw.org)[^3].
 
 - **Sidebar table** – Parse a selection or entire document into a searchable, sortable table with columns for Original, Full, Standard, and Official name formats, BCV codes, and chapter and verse numbers. Features include:
   - Accent-insensitive search/filter
@@ -76,8 +76,6 @@ Depending on the length of the scripture passage and the device, initial verse l
 ---
 
 Feel free to get in touch and post any [issues and/or suggestions](https://github.com/erykjj/traverture/issues).
-
-My other Obsidian plugin: **con[VER]sum**: [GitHub repo](https://github.com/erykjj/conversum),  [Obsidian Community](https://community.obsidian.md/plugins/conversum)
 
 ______
 

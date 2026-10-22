@@ -6,6 +6,10 @@ export interface TravertureSettings {
     // New settings
     linkScheme?: 'popup' | 'jwlibrary' | 'jworg';
     offlineEpubEnabled?: boolean;
+    showVerseText?: boolean;
+    includePublicationRefs?: boolean;
+    enableWolSearch?: boolean;
+    wolSearchSite?: 'wol' | 'jw';
 }
 
 export const DEFAULT_SETTINGS: TravertureSettings = {
@@ -15,6 +19,10 @@ export const DEFAULT_SETTINGS: TravertureSettings = {
     titleFormat: 'full',
     linkScheme: 'popup',
     offlineEpubEnabled: true,
+    showVerseText: false,
+    includePublicationRefs: false,
+    enableWolSearch: true,
+    wolSearchSite: 'wol',
 };
 
 export interface LanguageInfo {
