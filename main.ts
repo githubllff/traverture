@@ -619,6 +619,24 @@ export default class TraverturePlugin extends Plugin {
             this.processElement(element);
         });
 
+        // Ensure wol: search links are applied even in views that render
+        // asynchronously (e.g. mindmaps), where the post-processor may run
+        // before the final DOM is in place.
+        if (this.settings.enableWolSearch !== false) {
+            const observer = new MutationObserver((mutations) => {
+                if (this.settings.enableWolSearch === false) return;
+                for (const m of mutations) {
+                    for (const node of Array.from(m.addedNodes)) {
+                        if (node instanceof HTMLElement && (node.textContent || '').includes('wol:')) {
+                            this.applyWolSearchLinks(node);
+                        }
+                    }
+                }
+            });
+            observer.observe(activeDocument.body, { childList: true, subtree: true });
+            this.register(() => observer.disconnect());
+        }
+
         this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, _view) => {
             const selection = editor.getSelection();
 

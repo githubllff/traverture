@@ -1019,7 +1019,9 @@ function findWolTriggers(text) {
 function buildWolSearchUrl(settings, query) {
   const site = settings && settings.wolSearchSite || "wol";
   const lang = settings && settings.outputLanguage || "en";
-  const q = encodeURIComponent(query.trim()).replace(/%20/g, "+");
+  const trimmed = query.trim();
+  const quoted = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `"${trimmed}"`;
+  const q = encodeURIComponent(quoted).replace(/%20/g, "+");
   if (site === "jw") {
     return `https://www.jw.org/en/search/?q=${q}`;
   }
@@ -3010,6 +3012,20 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.registerMarkdownPostProcessor((element, _context) => {
       this.processElement(element);
     });
+    if (this.settings.enableWolSearch !== false) {
+      const observer = new MutationObserver((mutations) => {
+        if (this.settings.enableWolSearch === false) return;
+        for (const m of mutations) {
+          for (const node of Array.from(m.addedNodes)) {
+            if (node instanceof HTMLElement && (node.textContent || "").includes("wol:")) {
+              this.applyWolSearchLinks(node);
+            }
+          }
+        }
+      });
+      observer.observe(activeDocument.body, { childList: true, subtree: true });
+      this.register(() => observer.disconnect());
+    }
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, _view) => {
       const selection = editor.getSelection();
       menu.addItem((item) => {
