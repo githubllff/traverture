@@ -63,7 +63,7 @@ export function findWolTriggers(text: string): WolTrigger[] {
 export function buildWolSearchUrl(settings: WolSearchSettings | any, query: string): string {
     const site = (settings && settings.wolSearchSite) || "wol";
     const lang = (settings && settings.outputLanguage) || "en";
-    const q = encodeURIComponent(query.trim());
+    const q = encodeURIComponent(query.trim()).replace(/%20/g, '+');
 
     if (site === "jw") {
         return `https://www.jw.org/en/search/?q=${q}`;

@@ -1019,7 +1019,7 @@ function findWolTriggers(text) {
 function buildWolSearchUrl(settings, query) {
   const site = settings && settings.wolSearchSite || "wol";
   const lang = settings && settings.outputLanguage || "en";
-  const q = encodeURIComponent(query.trim());
+  const q = encodeURIComponent(query.trim()).replace(/%20/g, "+");
   if (site === "jw") {
     return `https://www.jw.org/en/search/?q=${q}`;
   }
@@ -2758,6 +2758,9 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       this.lastRefChapter = lastChapter;
       html = tempDiv.innerHTML;
     }
+    if (this.settings.enableWolSearch !== false) {
+      html = this.linkWolSearchesInHtml(html);
+    }
     const parsed = new DOMParser().parseFromString(html, "text/html");
     while (el.firstChild) el.removeChild(el.firstChild);
     for (const child of Array.from(parsed.body.childNodes)) {
@@ -2873,6 +2876,52 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       }
       textNode.parentNode?.replaceChild(fragment, textNode);
     }
+  }
+  linkWolSearchesInHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node2) => {
+        const parent = node2.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.tagName === "A" || parent.tagName === "CODE" || parent.tagName === "PRE") {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    const textNodes = [];
+    let node = walker.nextNode();
+    while (node) {
+      textNodes.push(node);
+      node = walker.nextNode();
+    }
+    for (const textNode of textNodes) {
+      const text = textNode.nodeValue || "";
+      if (!text) continue;
+      const triggers = findWolTriggers(text);
+      if (triggers.length === 0) continue;
+      const sorted = [...triggers].sort((a, b) => a.start - b.start);
+      const fragment = doc.createDocumentFragment();
+      let pos = 0;
+      for (const t of sorted) {
+        if (t.start > pos) {
+          fragment.appendChild(doc.createTextNode(text.substring(pos, t.start)));
+        }
+        const anchor = doc.createElement("a");
+        anchor.className = "traverture-wol-link";
+        anchor.href = buildWolSearchUrl(this.settings, t.query);
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.textContent = text.substring(t.start, t.end);
+        fragment.appendChild(anchor);
+        pos = t.end;
+      }
+      if (pos < text.length) {
+        fragment.appendChild(doc.createTextNode(text.substring(pos)));
+      }
+      textNode.parentNode?.replaceChild(fragment, textNode);
+    }
+    return doc.body.innerHTML;
   }
   async appendInlineVerseText(el) {
     if (!this.settings.showVerseText) return;
