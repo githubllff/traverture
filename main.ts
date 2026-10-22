@@ -428,7 +428,7 @@ export default class TraverturePlugin extends Plugin {
                 }
                 const anchor = activeDocument.createElement('a');
                 anchor.className = 'traverture-wol-link';
-                anchor.href = buildWolSearchUrl(this.settings, t.query);
+                anchor.href = buildWolSearchUrl(this.settings, t.query, t.site, t.phrase);
                 anchor.target = '_blank';
                 anchor.rel = 'noopener noreferrer';
                 anchor.textContent = text.substring(t.start, t.end);
@@ -477,7 +477,7 @@ export default class TraverturePlugin extends Plugin {
                 }
                 const anchor = doc.createElement('a');
                 anchor.className = 'traverture-wol-link';
-                anchor.href = buildWolSearchUrl(this.settings, t.query);
+                anchor.href = buildWolSearchUrl(this.settings, t.query, t.site, t.phrase);
                 anchor.target = '_blank';
                 anchor.rel = 'noopener noreferrer';
                 anchor.textContent = text.substring(t.start, t.end);

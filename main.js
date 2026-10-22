@@ -979,11 +979,14 @@ function augmentClauses(text, clauses) {
 }
 
 // wolSearch.ts
+var TRIGGER_RE = /\b(wol\.jw\.org|jw\.org|wol|jw):/gi;
 function findWolTriggers(text) {
   const triggers = [];
-  const re = /\bwol:/gi;
   let m;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = TRIGGER_RE.exec(text)) !== null) {
+    const prefix = m[1].toLowerCase();
+    const site = prefix.startsWith("jw") ? "jw" : "wol";
+    const phrase = site === "jw";
     const start = m.index;
     let i2 = m.index + m[0].length;
     if (text[i2] === " ") i2++;
@@ -1002,7 +1005,9 @@ function findWolTriggers(text) {
         if (text[end] === "\n") break;
         if (text.startsWith("  ", end)) break;
         if (end > i2 && ".!?".includes(text[end]) && (end + 1 >= text.length || /\s/.test(text[end + 1]))) break;
-        if (end > i2 && /\s/.test(text[end - 1]) && text.slice(end).toLowerCase().startsWith("wol:")) break;
+        if (end > i2 && /\s/.test(text[end - 1]) && /^(wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
+          break;
+        }
         end++;
       }
       consumedEnd = end;
@@ -1010,22 +1015,26 @@ function findWolTriggers(text) {
       query = query.replace(/[.!?;:,]+$/, "").trim();
     }
     if (query.length > 0) {
-      triggers.push({ start, end: consumedEnd, query });
+      triggers.push({ start, end: consumedEnd, query, site, phrase });
     }
-    re.lastIndex = Math.max(re.lastIndex, consumedEnd);
+    TRIGGER_RE.lastIndex = Math.max(TRIGGER_RE.lastIndex, consumedEnd);
   }
   return triggers;
 }
-function buildWolSearchUrl(settings, query) {
-  const site = settings && settings.wolSearchSite || "wol";
+function buildWolSearchUrl(settings, query, site, phrase) {
+  const resolvedSite = site || settings && settings.wolSearchSite || "wol";
   const lang = settings && settings.outputLanguage || "en";
   const trimmed = query.trim();
-  const quoted = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `"${trimmed}"`;
-  const q = encodeURIComponent(quoted).replace(/%20/g, "+");
-  if (site === "jw") {
+  const shouldQuote = phrase !== void 0 ? phrase : resolvedSite === "jw";
+  const toEncode = shouldQuote ? trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `"${trimmed}"` : trimmed;
+  const q = encodeURIComponent(toEncode).replace(/%20/g, "+");
+  if (resolvedSite === "jw") {
     return `https://www.jw.org/en/search/?q=${q}`;
   }
-  return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}`;
+  if (shouldQuote) {
+    return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}`;
+  }
+  return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}&st=&p=sen&r=occ`;
 }
 function openExternalUrl(url) {
   try {
@@ -1108,7 +1117,11 @@ function buildDecorations(view, plugin) {
           to: from + t.end,
           deco: import_view.Decoration.mark({
             class: "cm-traverture-wol-link",
-            attributes: { "data-wol-query": t.query }
+            attributes: {
+              "data-wol-query": t.query,
+              "data-wol-site": t.site,
+              "data-wol-phrase": t.phrase ? "1" : "0"
+            }
           })
         });
       }
@@ -1163,7 +1176,9 @@ function createTravertureEditorPlugin(plugin) {
             if (query) {
               e.preventDefault();
               e.stopPropagation();
-              const url = buildWolSearchUrl(plugin.settings, query);
+              const site = wolEl.getAttribute("data-wol-site") || void 0;
+              const phrase = wolEl.getAttribute("data-wol-phrase") === "1";
+              const url = buildWolSearchUrl(plugin.settings, query, site, phrase);
               openExternalUrl(url);
               return;
             }
@@ -2869,7 +2884,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         }
         const anchor = activeDocument.createElement("a");
         anchor.className = "traverture-wol-link";
-        anchor.href = buildWolSearchUrl(this.settings, t.query);
+        anchor.href = buildWolSearchUrl(this.settings, t.query, t.site, t.phrase);
         anchor.target = "_blank";
         anchor.rel = "noopener noreferrer";
         anchor.textContent = text.substring(t.start, t.end);
@@ -2914,7 +2929,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         }
         const anchor = doc.createElement("a");
         anchor.className = "traverture-wol-link";
-        anchor.href = buildWolSearchUrl(this.settings, t.query);
+        anchor.href = buildWolSearchUrl(this.settings, t.query, t.site, t.phrase);
         anchor.target = "_blank";
         anchor.rel = "noopener noreferrer";
         anchor.textContent = text.substring(t.start, t.end);

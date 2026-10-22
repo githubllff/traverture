@@ -1,11 +1,13 @@
 // wolSearch.ts
-// Detects "wol:" search triggers in text and builds search URLs for
-// wol.jw.org / jw.org, mirroring the inrefens-style auto-linking.
+// Detects "wol.jw.org:" / "wol:" / "jw.org:" / "jw:" search triggers in text
+// and builds search URLs for wol.jw.org / jw.org.
 
 export interface WolTrigger {
     start: number;
     end: number;
     query: string;
+    site: "wol" | "jw";
+    phrase: boolean;
 }
 
 export interface WolSearchSettings {
@@ -14,14 +16,19 @@ export interface WolSearchSettings {
     outputLanguage?: string;
 }
 
+const TRIGGER_RE = /\b(wol\.jw\.org|jw\.org|wol|jw):/gi;
+
 export function findWolTriggers(text: string): WolTrigger[] {
     const triggers: WolTrigger[] = [];
-    const re = /\bwol:/gi;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
+    while ((m = TRIGGER_RE.exec(text)) !== null) {
+        const prefix = m[1].toLowerCase();
+        const site: "wol" | "jw" = prefix.startsWith("jw") ? "jw" : "wol";
+        // jw.org searches are quoted (exact phrase); wol searches are sentence searches.
+        const phrase = site === "jw";
+
         const start = m.index;
         let i = m.index + m[0].length;
-        // Allow an optional space after the colon (e.g. "wol: search ...").
         if (text[i] === " ") i++;
 
         let query = "";
@@ -39,38 +46,49 @@ export function findWolTriggers(text: string): WolTrigger[] {
             while (end < text.length) {
                 if (text[end] === "\n") break;
                 if (text.startsWith("  ", end)) break;
-                // Stop at a sentence terminator followed by space/end.
                 if (end > i && ".!?".includes(text[end]) && (end + 1 >= text.length || /\s/.test(text[end + 1]))) break;
-                // Stop when another trigger begins.
-                if (end > i && /\s/.test(text[end - 1]) && text.slice(end).toLowerCase().startsWith("wol:")) break;
+                if (end > i && /\s/.test(text[end - 1]) && /^(wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
+                    break;
+                }
                 end++;
             }
             consumedEnd = end;
             query = text.substring(i, end).trim();
-            // Trim trailing punctuation that is unlikely to be part of the query.
             query = query.replace(/[.!?;:,]+$/, "").trim();
         }
 
         if (query.length > 0) {
-            triggers.push({ start, end: consumedEnd, query });
+            triggers.push({ start, end: consumedEnd, query, site, phrase });
         }
 
-        re.lastIndex = Math.max(re.lastIndex, consumedEnd);
+        TRIGGER_RE.lastIndex = Math.max(TRIGGER_RE.lastIndex, consumedEnd);
     }
     return triggers;
 }
 
-export function buildWolSearchUrl(settings: WolSearchSettings | any, query: string): string {
-    const site = (settings && settings.wolSearchSite) || "wol";
+export function buildWolSearchUrl(
+    settings: WolSearchSettings | any,
+    query: string,
+    site?: "wol" | "jw",
+    phrase?: boolean,
+): string {
+    const resolvedSite = site || (settings && settings.wolSearchSite) || "wol";
     const lang = (settings && settings.outputLanguage) || "en";
     const trimmed = query.trim();
-    const quoted = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `\"${trimmed}\"`;
-    const q = encodeURIComponent(quoted).replace(/%20/g, '+');
 
-    if (site === "jw") {
+    const shouldQuote = phrase !== undefined ? phrase : resolvedSite === "jw";
+    const toEncode = shouldQuote
+        ? (trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `\"${trimmed}\"`)
+        : trimmed;
+    const q = encodeURIComponent(toEncode).replace(/%20/g, "+");
+
+    if (resolvedSite === "jw") {
         return `https://www.jw.org/en/search/?q=${q}`;
     }
-    return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}`;
+    if (shouldQuote) {
+        return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}`;
+    }
+    return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}&st=&p=sen&r=occ`;
 }
 
 export function openExternalUrl(url: string): void {

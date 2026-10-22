@@ -74,7 +74,11 @@ function buildDecorations(view: any, plugin: any) {
                     to: from + t.end,
                     deco: Decoration.mark({
                         class: 'cm-traverture-wol-link',
-                        attributes: { 'data-wol-query': t.query },
+                        attributes: {
+                            'data-wol-query': t.query,
+                            'data-wol-site': t.site,
+                            'data-wol-phrase': t.phrase ? '1' : '0',
+                        },
                     }),
                 });
             }
@@ -131,7 +135,9 @@ export function createTravertureEditorPlugin(plugin: any) {
                         if (query) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const url = buildWolSearchUrl(plugin.settings, query);
+                            const site = (wolEl.getAttribute('data-wol-site') as 'wol' | 'jw') || undefined;
+                            const phrase = wolEl.getAttribute('data-wol-phrase') === '1';
+                            const url = buildWolSearchUrl(plugin.settings, query, site, phrase);
                             openExternalUrl(url);
                             return;
                         }
