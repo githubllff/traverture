@@ -1025,14 +1025,10 @@ function buildWolSearchUrl(settings, query, site, phrase) {
   const resolvedSite = site || settings && settings.wolSearchSite || "wol";
   const lang = settings && settings.outputLanguage || "en";
   const trimmed = query.trim();
-  const shouldQuote = phrase !== void 0 ? phrase : resolvedSite === "jw";
-  const toEncode = shouldQuote ? trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed : `"${trimmed}"` : trimmed;
+  const toEncode = trimmed;
   const q = encodeURIComponent(toEncode).replace(/%20/g, "+");
   if (resolvedSite === "jw") {
     return `https://www.jw.org/en/search/?q=${q}`;
-  }
-  if (shouldQuote) {
-    return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}`;
   }
   return `https://wol.jw.org/${encodeURIComponent(lang)}/wol/s/r1/lp-e?q=${q}&st=&p=sen&r=occ`;
 }
