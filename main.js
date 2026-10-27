@@ -2576,6 +2576,8 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.engine = null;
     this._verseTooltip = null;
+    this.autoInsertTimer = null;
+    this.isAutoInserting = false;
     this.processingElements = /* @__PURE__ */ new Set();
     this.lastRefBook = -1;
     this.lastRefChapter = -1;
@@ -3041,6 +3043,46 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     }
     return (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
   }
+  async maybeAutoInsertVerseText(editor) {
+    if (this.isAutoInserting) return;
+    const cursor = editor.getCursor();
+    const line = editor.getLine(cursor.line);
+    const refs = await this.parseReferences(line);
+    if (refs.length === 0) return;
+    const ref = refs[0];
+    if (ref.startVerse === 0) return;
+    await this.promptInsertVerseText(editor, ref, cursor.line);
+  }
+  async promptInsertVerseText(editor, ref, lineNum) {
+    const verseData = await fetchVerseWithExtrasOfflineFirst(ref.startBcv, this.settings.outputLanguage, this.offlineRepo);
+    if (!verseData) {
+      new import_obsidian5.Notice("Verse lookup unavailable.");
+      return;
+    }
+    const tempDiv = activeDocument.createElement("div");
+    const parsed = new DOMParser().parseFromString(verseData.html, "text/html");
+    for (const child of Array.from(parsed.body.childNodes)) tempDiv.appendChild(child.cloneNode(true));
+    const verseText = (tempDiv.textContent || "").replace(/\\s+/g, " ").trim();
+    if (!verseText) return;
+    const template = this.settings.verseQuoteTemplate || '{bibleRef}: "{quote}"';
+    const linked = `[${ref.scripture}](jwlibrary:///finder?bible=${ref.startBcv})`;
+    const replacement = template.replace(/\\{bibleRefLinked\\}/g, linked).replace(/\\{bibleRef\\}/g, ref.scripture).replace(/\\{quote\\}/g, verseText);
+    const modal = new VerseInsertModal(this.app, replacement, async (confirmed) => {
+      if (!confirmed) return;
+      this.isAutoInserting = true;
+      try {
+        const line = editor.getLine(lineNum);
+        const idx = line.indexOf(ref.scripture);
+        if (idx === -1) return;
+        const from = { line: lineNum, ch: idx };
+        const to = { line: lineNum, ch: idx + ref.scripture.length };
+        editor.replaceRange(replacement, from, to);
+      } finally {
+        this.isAutoInserting = false;
+      }
+    });
+    modal.open();
+  }
   async appendInlineVerseText(el) {
     if (!this.settings.showVerseText) return;
     const links = Array.from(el.querySelectorAll(".traverture-ref-link"));
@@ -3125,6 +3167,15 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     this.registerMarkdownPostProcessor((element, _context) => {
       this.processElement(element);
     });
+    this.registerEvent(this.app.workspace.on("editor-change", (editor) => {
+      if (!this.settings.autoInsertVerseText) return;
+      if (this.isAutoInserting) return;
+      if (this.autoInsertTimer !== null) window.clearTimeout(this.autoInsertTimer);
+      this.autoInsertTimer = window.setTimeout(() => {
+        this.autoInsertTimer = null;
+        void this.maybeAutoInsertVerseText(editor);
+      }, 1200);
+    }));
     if (this.settings.enableWolSearch !== false) {
       const observer = new MutationObserver((mutations) => {
         if (this.settings.enableWolSearch === false) return;
@@ -3334,6 +3385,22 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           result = result.replace(new RegExp(escaped), replacement);
         }
         editor.setValue(result);
+      }
+    });
+    this.addCommand({
+      id: "insert-verse-text-at-cursor",
+      name: "tra.VER:ture: Insert verse text at cursor (preview)",
+      icon: "quote-glyph",
+      editorCallback: async (editor) => {
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+        const refs = await this.parseReferences(line);
+        if (refs.length === 0) {
+          new import_obsidian5.Notice("No scripture reference at cursor.");
+          return;
+        }
+        const ref = refs[0];
+        await this.promptInsertVerseText(editor, ref, cursor.line);
       }
     });
     this.addCommand({
@@ -3648,5 +3715,32 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     return menu;
   }
   onunload() {
+  }
+};
+var VerseInsertModal = class extends import_obsidian5.Modal {
+  constructor(app, preview, onResult) {
+    super(app);
+    this.preview = preview;
+    this.onResult = onResult;
+    this.confirmed = false;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Insert verse text?" });
+    contentEl.createEl("pre", { text: this.preview });
+    new import_obsidian5.Setting(contentEl).addButton((btn) => {
+      btn.setButtonText("Insert").setCta().onClick(() => {
+        this.confirmed = true;
+        this.close();
+      });
+    }).addButton((btn) => {
+      btn.setButtonText("Cancel").onClick(() => {
+        this.confirmed = false;
+        this.close();
+      });
+    });
+  }
+  onClose() {
+    this.onResult(this.confirmed);
   }
 };

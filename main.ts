@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, Notice, Menu, MarkdownView } from 'obsidian';
+import { Plugin, WorkspaceLeaf, Notice, Menu, MarkdownView, Modal, Setting, ButtonComponent } from 'obsidian';
 // @ts-ignore
 import wasmBinary from './engine_bg.wasm';
 // @ts-ignore
@@ -19,6 +19,8 @@ export default class TraverturePlugin extends Plugin {
     settings = DEFAULT_SETTINGS;
     engine: any = null;
     private _verseTooltip: HTMLElement | null = null;
+    private autoInsertTimer: number | null = null;
+    private isAutoInserting = false;
     private processingElements = new Set<HTMLElement>();
     private lastRefBook = -1;
     private lastRefChapter = -1;
@@ -571,6 +573,53 @@ export default class TraverturePlugin extends Plugin {
         return (tempDiv.textContent || '').replace(/\s+/g, ' ').trim();
     }
 
+    private async maybeAutoInsertVerseText(editor: any): Promise<void> {
+        if (this.isAutoInserting) return;
+        const cursor = editor.getCursor();
+        const line = editor.getLine(cursor.line);
+        const refs = await this.parseReferences(line);
+        if (refs.length === 0) return;
+        const ref = refs[0];
+        if (ref.startVerse === 0) return;
+        await this.promptInsertVerseText(editor, ref, cursor.line);
+    }
+
+    private async promptInsertVerseText(editor: any, ref: any, lineNum: number): Promise<void> {
+        const verseData = await fetchVerseWithExtrasOfflineFirst(ref.startBcv, this.settings.outputLanguage, this.offlineRepo);
+        if (!verseData) {
+            new Notice('Verse lookup unavailable.');
+            return;
+        }
+        const tempDiv = activeDocument.createElement('div');
+        const parsed = new DOMParser().parseFromString(verseData.html, 'text/html');
+        for (const child of Array.from(parsed.body.childNodes)) tempDiv.appendChild(child.cloneNode(true));
+        const verseText = (tempDiv.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (!verseText) return;
+
+        const template = this.settings.verseQuoteTemplate || '{bibleRef}: "{quote}"';
+        const linked = `[${ref.scripture}](jwlibrary:///finder?bible=${ref.startBcv})`;
+        const replacement = template
+            .replace(/\\{bibleRefLinked\\}/g, linked)
+            .replace(/\\{bibleRef\\}/g, ref.scripture)
+            .replace(/\\{quote\\}/g, verseText);
+
+        const modal = new VerseInsertModal(this.app, replacement, async (confirmed) => {
+            if (!confirmed) return;
+            this.isAutoInserting = true;
+            try {
+                const line = editor.getLine(lineNum);
+                const idx = line.indexOf(ref.scripture);
+                if (idx === -1) return;
+                const from = { line: lineNum, ch: idx };
+                const to = { line: lineNum, ch: idx + ref.scripture.length };
+                editor.replaceRange(replacement, from, to);
+            } finally {
+                this.isAutoInserting = false;
+            }
+        });
+        modal.open();
+    }
+
     private async appendInlineVerseText(el: HTMLElement): Promise<void> {
         if (!this.settings.showVerseText) return;
 
@@ -696,6 +745,16 @@ export default class TraverturePlugin extends Plugin {
         this.registerMarkdownPostProcessor((element, _context) => {
             this.processElement(element);
         });
+
+        this.registerEvent(this.app.workspace.on('editor-change', (editor) => {
+            if (!this.settings.autoInsertVerseText) return;
+            if (this.isAutoInserting) return;
+            if (this.autoInsertTimer !== null) window.clearTimeout(this.autoInsertTimer);
+            this.autoInsertTimer = window.setTimeout(() => {
+                this.autoInsertTimer = null;
+                void this.maybeAutoInsertVerseText(editor);
+            }, 1200);
+        }));
 
         // Ensure wol: search links are applied even in views that render
         // asynchronously (e.g. mindmaps), where the post-processor may run
@@ -980,6 +1039,23 @@ export default class TraverturePlugin extends Plugin {
                     result = result.replace(new RegExp(escaped), replacement);
                 }
                 editor.setValue(result);
+            }
+        });
+
+        this.addCommand({
+            id: 'insert-verse-text-at-cursor',
+            name: 'tra.VER:ture: Insert verse text at cursor (preview)',
+            icon: 'quote-glyph',
+            editorCallback: async (editor: any) => {
+                const cursor = editor.getCursor();
+                const line = editor.getLine(cursor.line);
+                const refs = await this.parseReferences(line);
+                if (refs.length === 0) {
+                    new Notice('No scripture reference at cursor.');
+                    return;
+                }
+                const ref = refs[0];
+                await this.promptInsertVerseText(editor, ref, cursor.line);
             }
         });
 
@@ -1362,4 +1438,32 @@ export default class TraverturePlugin extends Plugin {
     }
 
     onunload() { }
+}
+
+class VerseInsertModal extends Modal {
+    private confirmed = false;
+    constructor(app: any, private preview: string, private onResult: (confirmed: boolean) => void) {
+        super(app);
+    }
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h3', { text: 'Insert verse text?' });
+        contentEl.createEl('pre', { text: this.preview });
+        new Setting(contentEl)
+            .addButton((btn: ButtonComponent) => {
+                btn.setButtonText('Insert').setCta().onClick(() => {
+                    this.confirmed = true;
+                    this.close();
+                });
+            })
+            .addButton((btn: ButtonComponent) => {
+                btn.setButtonText('Cancel').onClick(() => {
+                    this.confirmed = false;
+                    this.close();
+                });
+            });
+    }
+    onClose() {
+        this.onResult(this.confirmed);
+    }
 }
