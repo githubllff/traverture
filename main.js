@@ -490,7 +490,10 @@ async function fetchVerseWithExtras(range, langCode, signal) {
     }
   } catch (e) {
     if (signal?.aborted) return null;
-    console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+    const status = e?.status;
+    if (status !== 404) {
+      console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+    }
   }
   return null;
 }
@@ -2971,6 +2974,16 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
   async showVerseTooltip(link) {
     const bcv = link.getAttribute("data-bcv");
     if (!bcv) return;
+    if (bcv.substring(5, 8) === "000") {
+      if (this._verseTooltip) {
+        this._verseTooltip.textContent = "Whole chapter";
+        const rect2 = link.getBoundingClientRect();
+        this._verseTooltip.style.left = `${rect2.left + window.scrollX}px`;
+        this._verseTooltip.style.top = `${rect2.bottom + window.scrollY + 4}px`;
+        this._verseTooltip.style.display = "block";
+      }
+      return;
+    }
     if (!this._verseTooltip) {
       const tip2 = activeDocument.createElement("div");
       tip2.className = "traverture-verse-tooltip";
@@ -3292,6 +3305,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         }
         let result = text;
         for (const ref of refs) {
+          if (ref.startVerse === 0) continue;
           const verseData = await fetchVerseWithExtrasOfflineFirst(ref.startBcv, this.settings.outputLanguage, this.offlineRepo);
           if (!verseData) continue;
           const tempDiv = activeDocument.createElement("div");

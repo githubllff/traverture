@@ -64,7 +64,10 @@ export async function fetchVerseWithExtras(range: string, langCode: string, sign
         }
     } catch (e) {
         if (signal?.aborted) return null;
-        console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+        const status = (e as any)?.status;
+        if (status !== 404) {
+            console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+        }
     }
     return null;
 }
@@ -134,7 +137,10 @@ export async function fetchVerse(range: string, langCode: string): Promise<Verse
             return result;
         }
     } catch (e) {
-        console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+        const status = (e as any)?.status;
+        if (status !== 404) {
+            console.error(`tra.VER:ture: Error fetching verse "${apiRange}":`, e);
+        }
     }
     return null;
 }

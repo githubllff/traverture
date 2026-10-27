@@ -513,6 +513,17 @@ export default class TraverturePlugin extends Plugin {
     private async showVerseTooltip(link: HTMLElement): Promise<void> {
         const bcv = link.getAttribute('data-bcv');
         if (!bcv) return;
+        // Whole-chapter references have no single verse text.
+        if (bcv.substring(5, 8) === '000') {
+            if (this._verseTooltip) {
+                this._verseTooltip.textContent = 'Whole chapter';
+                const rect = link.getBoundingClientRect();
+                this._verseTooltip.style.left = `${rect.left + window.scrollX}px`;
+                this._verseTooltip.style.top = `${rect.bottom + window.scrollY + 4}px`;
+                this._verseTooltip.style.display = 'block';
+            }
+            return;
+        }
         if (!this._verseTooltip) {
             const tip = activeDocument.createElement('div');
             tip.className = 'traverture-verse-tooltip';
@@ -951,6 +962,7 @@ export default class TraverturePlugin extends Plugin {
                 let result = text;
                 // Insert verse text after each unique reference occurrence (simplest: append once per ref).
                 for (const ref of refs) {
+                    if (ref.startVerse === 0) continue; // skip whole-chapter references
                     const verseData = await fetchVerseWithExtrasOfflineFirst(ref.startBcv, this.settings.outputLanguage, this.offlineRepo);
                     if (!verseData) continue;
                     const tempDiv = activeDocument.createElement('div');
