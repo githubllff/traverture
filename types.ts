@@ -7,6 +7,7 @@ export interface TravertureSettings {
     linkScheme?: 'popup' | 'jwlibrary' | 'jworg';
     offlineEpubEnabled?: boolean;
     showVerseText?: boolean;
+    verseTextMode?: 'hover' | 'inline';
     includePublicationRefs?: boolean;
     enableWolSearch?: boolean;
     wolSearchSite?: 'wol' | 'jw';
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: TravertureSettings = {
     linkScheme: 'popup',
     offlineEpubEnabled: true,
     showVerseText: false,
+    verseTextMode: 'inline',
     includePublicationRefs: false,
     enableWolSearch: true,
     wolSearchSite: 'wol',

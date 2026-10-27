@@ -168,12 +168,26 @@ export class TravertureSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Show verse text after link")
-      .setDesc("Append the verse text immediately after each scripture link (uses offline EPUB when available).")
+      .setDesc("Enable showing scripture text with links.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.showVerseText ?? false)
           .onChange(async (value) => {
             this.plugin.settings.showVerseText = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Verse text display")
+      .setDesc("Hover popup or inline text after the link (reading view).")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("inline", "Inline (after link)");
+        dropdown.addOption("hover", "Hover popup");
+        dropdown
+          .setValue(this.plugin.settings.verseTextMode ?? "inline")
+          .onChange(async (value) => {
+            this.plugin.settings.verseTextMode = value === "hover" ? "hover" : "inline";
             await this.plugin.saveSettings();
           });
       });

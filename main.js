@@ -1354,9 +1354,17 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian3.Setting(containerEl).setName("Show verse text after link").setDesc("Append the verse text immediately after each scripture link (uses offline EPUB when available).").addToggle((toggle) => {
+    new import_obsidian3.Setting(containerEl).setName("Show verse text after link").setDesc("Enable showing scripture text with links.").addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.showVerseText ?? false).onChange(async (value) => {
         this.plugin.settings.showVerseText = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian3.Setting(containerEl).setName("Verse text display").setDesc("Hover popup or inline text after the link (reading view).").addDropdown((dropdown) => {
+      dropdown.addOption("inline", "Inline (after link)");
+      dropdown.addOption("hover", "Hover popup");
+      dropdown.setValue(this.plugin.settings.verseTextMode ?? "inline").onChange(async (value) => {
+        this.plugin.settings.verseTextMode = value === "hover" ? "hover" : "inline";
         await this.plugin.saveSettings();
       });
     });
@@ -1431,6 +1439,7 @@ var DEFAULT_SETTINGS = {
   linkScheme: "popup",
   offlineEpubEnabled: true,
   showVerseText: false,
+  verseTextMode: "inline",
   includePublicationRefs: false,
   enableWolSearch: true,
   wolSearchSite: "wol"
@@ -2549,6 +2558,7 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.engine = null;
+    this._verseTooltip = null;
     this.processingElements = /* @__PURE__ */ new Set();
     this.lastRefBook = -1;
     this.lastRefChapter = -1;
@@ -2840,7 +2850,13 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
         })();
       });
     });
-    void this.appendInlineVerseText(el);
+    if (this.settings.showVerseText) {
+      if ((this.settings.verseTextMode ?? "inline") === "hover") {
+        this.attachVerseHover(el);
+      } else {
+        void this.appendInlineVerseText(el);
+      }
+    }
     if (this.settings.enableWolSearch !== false) {
       this.applyWolSearchLinks(el);
       setTimeout(() => {
@@ -2938,6 +2954,65 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       textNode.parentNode?.replaceChild(fragment, textNode);
     }
     return doc.body.innerHTML;
+  }
+  attachVerseHover(el) {
+    const links = Array.from(el.querySelectorAll(".traverture-ref-link"));
+    for (const link of links) {
+      if (link.dataset.verseHover === "1") continue;
+      link.dataset.verseHover = "1";
+      link.addEventListener("mouseenter", () => {
+        void this.showVerseTooltip(link);
+      });
+      link.addEventListener("mouseleave", () => {
+        this.hideVerseTooltip();
+      });
+    }
+  }
+  async showVerseTooltip(link) {
+    const bcv = link.getAttribute("data-bcv");
+    if (!bcv) return;
+    if (!this._verseTooltip) {
+      const tip2 = activeDocument.createElement("div");
+      tip2.className = "traverture-verse-tooltip";
+      tip2.style.position = "absolute";
+      tip2.style.zIndex = "9999";
+      tip2.style.maxWidth = "400px";
+      tip2.style.padding = "8px 10px";
+      tip2.style.borderRadius = "6px";
+      tip2.style.background = "var(--background-primary, #fff)";
+      tip2.style.color = "var(--text-normal, #000)";
+      tip2.style.boxShadow = "0 2px 8px rgba(0,0,0,0.25)";
+      tip2.style.display = "none";
+      activeDocument.body.appendChild(tip2);
+      this._verseTooltip = tip2;
+    }
+    const tip = this._verseTooltip;
+    tip.textContent = "Loading...";
+    const rect = link.getBoundingClientRect();
+    tip.style.left = `${rect.left + window.scrollX}px`;
+    tip.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    tip.style.display = "block";
+    const text = await this.fetchVerseTextForTooltip(bcv);
+    if (tip.style.display === "block") {
+      tip.textContent = text || "Verse lookup unavailable";
+    }
+  }
+  hideVerseTooltip() {
+    if (this._verseTooltip) this._verseTooltip.style.display = "none";
+  }
+  async fetchVerseTextForTooltip(bcv) {
+    const verseData = await fetchVerseWithExtrasOfflineFirst(
+      bcv,
+      this.settings.outputLanguage,
+      this.offlineRepo
+    );
+    if (!verseData) return "";
+    const tempDiv = activeDocument.createElement("div");
+    const parsed = new DOMParser().parseFromString(verseData.html, "text/html");
+    for (const child of Array.from(parsed.body.childNodes)) {
+      tempDiv.appendChild(child.cloneNode(true));
+    }
+    return (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
   }
   async appendInlineVerseText(el) {
     if (!this.settings.showVerseText) return;
@@ -3200,6 +3275,34 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
       icon: "scroll",
       editorCallback: () => {
         this.showTravertureMenu().showAtMouseEvent({ clientX: 100, clientY: 100 });
+      }
+    });
+    this.addCommand({
+      id: "insert-verse-text-document",
+      name: "tra.VER:ture: Insert verse text after references",
+      icon: "quote-glyph",
+      callback: async () => {
+        const editor = this.app.workspace.activeEditor?.editor;
+        if (!editor) return;
+        const text = editor.getValue();
+        const refs = await this.parseReferences(text);
+        if (refs.length === 0) {
+          new import_obsidian5.Notice("No scripture references found.");
+          return;
+        }
+        let result = text;
+        for (const ref of refs) {
+          const verseData = await fetchVerseWithExtrasOfflineFirst(ref.startBcv, this.settings.outputLanguage, this.offlineRepo);
+          if (!verseData) continue;
+          const tempDiv = activeDocument.createElement("div");
+          const parsed = new DOMParser().parseFromString(verseData.html, "text/html");
+          for (const child of Array.from(parsed.body.childNodes)) tempDiv.appendChild(child.cloneNode(true));
+          const verseText = (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
+          if (!verseText) continue;
+          const escaped = ref.scripture.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          result = result.replace(new RegExp(escaped), `${ref.scripture} \u2014 ${verseText}`);
+        }
+        editor.setValue(result);
       }
     });
     this.addCommand({
