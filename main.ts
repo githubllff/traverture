@@ -970,8 +970,14 @@ export default class TraverturePlugin extends Plugin {
                     for (const child of Array.from(parsed.body.childNodes)) tempDiv.appendChild(child.cloneNode(true));
                     const verseText = (tempDiv.textContent || '').replace(/\s+/g, ' ').trim();
                     if (!verseText) continue;
+                    const template = this.settings.verseQuoteTemplate || '{bibleRef}: "{quote}"';
+                    const linked = `[${ref.scripture}](jwlibrary:///finder?bible=${ref.startBcv})`;
+                    const replacement = template
+                        .replace(/\{bibleRefLinked\}/g, linked)
+                        .replace(/\{bibleRef\}/g, ref.scripture)
+                        .replace(/\{quote\}/g, verseText);
                     const escaped = ref.scripture.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    result = result.replace(new RegExp(escaped), `${ref.scripture} — ${verseText}`);
+                    result = result.replace(new RegExp(escaped), replacement);
                 }
                 editor.setValue(result);
             }

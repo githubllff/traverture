@@ -193,6 +193,30 @@ export class TravertureSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Verse quote template")
+      .setDesc("Template for inserted verse text. Variables: {bibleRef}, {bibleRefLinked}, {quote}")
+      .addText((text) => {
+        text
+          .setValue(this.plugin.settings.verseQuoteTemplate ?? '{bibleRef}: "{quote}"')
+          .onChange(async (value) => {
+            this.plugin.settings.verseQuoteTemplate = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Auto-insert verse text while typing")
+      .setDesc("When enabled, verse text is inserted after detected references in the note (experimental).")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.autoInsertVerseText ?? false)
+          .onChange(async (value) => {
+            this.plugin.settings.autoInsertVerseText = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
       .setName("Enable WOL search links")
       .setDesc("Turn typed 'wol:...' triggers into clickable search links (similar to inrefens).")
       .addToggle((toggle) => {

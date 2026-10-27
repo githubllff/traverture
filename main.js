@@ -1371,6 +1371,18 @@ var TravertureSettingTab = class extends import_obsidian3.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
+    new import_obsidian3.Setting(containerEl).setName("Verse quote template").setDesc("Template for inserted verse text. Variables: {bibleRef}, {bibleRefLinked}, {quote}").addText((text) => {
+      text.setValue(this.plugin.settings.verseQuoteTemplate ?? '{bibleRef}: "{quote}"').onChange(async (value) => {
+        this.plugin.settings.verseQuoteTemplate = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian3.Setting(containerEl).setName("Auto-insert verse text while typing").setDesc("When enabled, verse text is inserted after detected references in the note (experimental).").addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.autoInsertVerseText ?? false).onChange(async (value) => {
+        this.plugin.settings.autoInsertVerseText = value;
+        await this.plugin.saveSettings();
+      });
+    });
     new import_obsidian3.Setting(containerEl).setName("Enable WOL search links").setDesc("Turn typed 'wol:...' triggers into clickable search links (similar to inrefens).").addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.enableWolSearch ?? true).onChange(async (value) => {
         this.plugin.settings.enableWolSearch = value;
@@ -1443,6 +1455,8 @@ var DEFAULT_SETTINGS = {
   offlineEpubEnabled: true,
   showVerseText: false,
   verseTextMode: "inline",
+  verseQuoteTemplate: '{bibleRef}: "{quote}"',
+  autoInsertVerseText: false,
   includePublicationRefs: false,
   enableWolSearch: true,
   wolSearchSite: "wol"
@@ -3313,8 +3327,11 @@ var TraverturePlugin = class extends import_obsidian5.Plugin {
           for (const child of Array.from(parsed.body.childNodes)) tempDiv.appendChild(child.cloneNode(true));
           const verseText = (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
           if (!verseText) continue;
+          const template = this.settings.verseQuoteTemplate || '{bibleRef}: "{quote}"';
+          const linked = `[${ref.scripture}](jwlibrary:///finder?bible=${ref.startBcv})`;
+          const replacement = template.replace(/\{bibleRefLinked\}/g, linked).replace(/\{bibleRef\}/g, ref.scripture).replace(/\{quote\}/g, verseText);
           const escaped = ref.scripture.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          result = result.replace(new RegExp(escaped), `${ref.scripture} \u2014 ${verseText}`);
+          result = result.replace(new RegExp(escaped), replacement);
         }
         editor.setValue(result);
       }

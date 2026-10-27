@@ -8,6 +8,8 @@ export interface TravertureSettings {
     offlineEpubEnabled?: boolean;
     showVerseText?: boolean;
     verseTextMode?: 'hover' | 'inline';
+    verseQuoteTemplate?: string;
+    autoInsertVerseText?: boolean;
     includePublicationRefs?: boolean;
     enableWolSearch?: boolean;
     wolSearchSite?: 'wol' | 'jw';
@@ -22,6 +24,8 @@ export const DEFAULT_SETTINGS: TravertureSettings = {
     offlineEpubEnabled: true,
     showVerseText: false,
     verseTextMode: 'inline',
+    verseQuoteTemplate: '{bibleRef}: "{quote}"',
+    autoInsertVerseText: false,
     includePublicationRefs: false,
     enableWolSearch: true,
     wolSearchSite: 'wol',
