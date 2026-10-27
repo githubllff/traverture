@@ -135,7 +135,7 @@ export function createTravertureEditorPlugin(plugin: any) {
                         if (query) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const site = (wolEl.getAttribute('data-wol-site') as 'wol' | 'jw') || undefined;
+                            const site = (wolEl.getAttribute('data-wol-site') as 'wol' | 'jw' | 'perplexity' | 'chat') || undefined;
                             const phrase = wolEl.getAttribute('data-wol-phrase') === '1';
                             const url = buildWolSearchUrl(plugin.settings, query, site, phrase);
                             openExternalUrl(url);

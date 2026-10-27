@@ -1,12 +1,11 @@
 // wolSearch.ts
-// Detects "wol.jw.org:" / "wol:" / "jw.org:" / "jw:" search triggers in text
-// and builds search URLs for wol.jw.org / jw.org.
+// Detects search triggers in text and builds search URLs.
 
 export interface WolTrigger {
     start: number;
     end: number;
     query: string;
-    site: "wol" | "jw";
+    site: "wol" | "jw" | "perplexity" | "chat";
     phrase: boolean;
 }
 
@@ -16,16 +15,28 @@ export interface WolSearchSettings {
     outputLanguage?: string;
 }
 
-const TRIGGER_RE = /\b(wol\.jw\.org|jw\.org|wol|jw):/gi;
+const TRIGGER_RE = /\b(perplexity|chat|wol\.jw\.org|jw\.org|wol|jw):/gi;
+
+function restrictedQuery(query: string): string {
+    return `${query.trim()} (search only on jw.org and wol.jw.org)`;
+}
 
 export function findWolTriggers(text: string): WolTrigger[] {
     const triggers: WolTrigger[] = [];
     let m: RegExpExecArray | null;
     while ((m = TRIGGER_RE.exec(text)) !== null) {
         const prefix = m[1].toLowerCase();
-        const site: "wol" | "jw" = prefix.startsWith("jw") ? "jw" : "wol";
-        // jw.org searches are quoted (exact phrase); wol searches are sentence searches.
-        const phrase = site === "jw";
+        let site: "wol" | "jw" | "perplexity" | "chat";
+        let phrase = false;
+        if (prefix === "perplexity") {
+            site = "perplexity";
+        } else if (prefix === "chat") {
+            site = "chat";
+        } else if (prefix.startsWith("jw")) {
+            site = "jw";
+        } else {
+            site = "wol";
+        }
 
         const start = m.index;
         let i = m.index + m[0].length;
@@ -47,7 +58,7 @@ export function findWolTriggers(text: string): WolTrigger[] {
                 if (text[end] === "\n") break;
                 if (text.startsWith("  ", end)) break;
                 if (end > i && ".!?".includes(text[end]) && (end + 1 >= text.length || /\s/.test(text[end + 1]))) break;
-                if (end > i && /\s/.test(text[end - 1]) && /^(wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
+                if (end > i && /\s/.test(text[end - 1]) && /^(perplexity|chat|wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
                     break;
                 }
                 end++;
@@ -69,16 +80,23 @@ export function findWolTriggers(text: string): WolTrigger[] {
 export function buildWolSearchUrl(
     settings: WolSearchSettings | any,
     query: string,
-    site?: "wol" | "jw",
+    site?: "wol" | "jw" | "perplexity" | "chat",
     phrase?: boolean,
 ): string {
-    const resolvedSite = site || (settings && settings.wolSearchSite) || "wol";
+    const resolvedSite = site || "wol";
     const lang = (settings && settings.outputLanguage) || "en";
     const trimmed = query.trim();
 
-    // Search the expression exactly as typed: do not add surrounding quotes.
-    const toEncode = trimmed;
-    const q = encodeURIComponent(toEncode).replace(/%20/g, "+");
+    if (resolvedSite === "perplexity") {
+        const q = encodeURIComponent(restrictedQuery(trimmed));
+        return `https://www.perplexity.ai/search?q=${q}`;
+    }
+    if (resolvedSite === "chat") {
+        const q = encodeURIComponent(restrictedQuery(trimmed));
+        return `https://chatgpt.com/?q=${q}`;
+    }
+
+    const q = encodeURIComponent(trimmed).replace(/%20/g, "+");
 
     if (resolvedSite === "jw") {
         return `https://www.jw.org/en/search/?q=${q}`;

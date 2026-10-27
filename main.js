@@ -982,14 +982,26 @@ function augmentClauses(text, clauses) {
 }
 
 // wolSearch.ts
-var TRIGGER_RE = /\b(wol\.jw\.org|jw\.org|wol|jw):/gi;
+var TRIGGER_RE = /\b(perplexity|chat|wol\.jw\.org|jw\.org|wol|jw):/gi;
+function restrictedQuery(query) {
+  return `${query.trim()} (search only on jw.org and wol.jw.org)`;
+}
 function findWolTriggers(text) {
   const triggers = [];
   let m;
   while ((m = TRIGGER_RE.exec(text)) !== null) {
     const prefix = m[1].toLowerCase();
-    const site = prefix.startsWith("jw") ? "jw" : "wol";
-    const phrase = site === "jw";
+    let site;
+    let phrase = false;
+    if (prefix === "perplexity") {
+      site = "perplexity";
+    } else if (prefix === "chat") {
+      site = "chat";
+    } else if (prefix.startsWith("jw")) {
+      site = "jw";
+    } else {
+      site = "wol";
+    }
     const start = m.index;
     let i2 = m.index + m[0].length;
     if (text[i2] === " ") i2++;
@@ -1008,7 +1020,7 @@ function findWolTriggers(text) {
         if (text[end] === "\n") break;
         if (text.startsWith("  ", end)) break;
         if (end > i2 && ".!?".includes(text[end]) && (end + 1 >= text.length || /\s/.test(text[end + 1]))) break;
-        if (end > i2 && /\s/.test(text[end - 1]) && /^(wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
+        if (end > i2 && /\s/.test(text[end - 1]) && /^(perplexity|chat|wol\.jw\.org|jw\.org|wol|jw):/i.test(text.slice(end))) {
           break;
         }
         end++;
@@ -1025,11 +1037,18 @@ function findWolTriggers(text) {
   return triggers;
 }
 function buildWolSearchUrl(settings, query, site, phrase) {
-  const resolvedSite = site || settings && settings.wolSearchSite || "wol";
+  const resolvedSite = site || "wol";
   const lang = settings && settings.outputLanguage || "en";
   const trimmed = query.trim();
-  const toEncode = trimmed;
-  const q = encodeURIComponent(toEncode).replace(/%20/g, "+");
+  if (resolvedSite === "perplexity") {
+    const q2 = encodeURIComponent(restrictedQuery(trimmed));
+    return `https://www.perplexity.ai/search?q=${q2}`;
+  }
+  if (resolvedSite === "chat") {
+    const q2 = encodeURIComponent(restrictedQuery(trimmed));
+    return `https://chatgpt.com/?q=${q2}`;
+  }
+  const q = encodeURIComponent(trimmed).replace(/%20/g, "+");
   if (resolvedSite === "jw") {
     return `https://www.jw.org/en/search/?q=${q}`;
   }
